@@ -175,19 +175,20 @@ def generate():
 
     plugin_name = context['plugin_name']
 
-    # -------------------------------------------------------------------------
-    # SKELETON: this first cut produces an empty zip with just a README
-    # confirming the pipeline works. Once the sub-templates are in place, this
-    # block expands to render each and add it to the archive.
-    # -------------------------------------------------------------------------
+    try:
+        plugin_source = plugin_env.get_template('scte_plugin.py.j2').render(**context)
+    except Exception as e:
+        # Surface Jinja errors to the browser so we can debug template issues
+        # in-place during development. Once stable, this can become a 500.
+        import traceback
+        return (
+            f'<pre>Template render failed:\n\n{e}\n\n{traceback.format_exc()}</pre>',
+            500,
+        )
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr(
-            f'{plugin_name}/README.md',
-            f'# {plugin_name}\n\n'
-            f'Skeleton output — pipeline works.\n\n'
-            f'Context:\n```\n{context}\n```\n'
-        )
+        zf.writestr(f'{plugin_name}/scte_{plugin_name}.py', plugin_source)
     buf.seek(0)
 
     return send_file(

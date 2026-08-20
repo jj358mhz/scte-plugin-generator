@@ -1,0 +1,144 @@
+{#-
+  _method_scte_logger.py.j2 — SCTELogger diagnostic method.
+
+  Always included in every generated plugin. Emits a log-only walker over
+  incoming SCTE-35 packets, bound to channel_group='scte_logger'. Never
+  changes slicer state — safe to point any channel at scte_logger for
+  observability without affecting slicing.
+
+  Rendered from scte_plugin.py.j2 via {% include %}.
+  No `m` context in scope — this method has a fixed name and channel_group.
+-#}
+# =============================================================================
+# SCTELogger — diagnostic channel_group method
+# =============================================================================
+# Log-only walker over an incoming SCTE-35 packet. Never calls slicer state-
+# changing APIs (ContentStart, AdStart, Blackout, etc.) — safe to point any
+# channel at `channel_group: scte_logger` for observability without affecting
+# slicing behavior.
+
+# SCTE-35 segmentation_type_id table.
+# Values from ANSI/SCTE 35 (2023r2) §10.3.3.1 Table 22. `has_duration` flags
+# the descriptors where a segmentation_duration is expected on the START event.
+_SCTE_SEG_TYPES = (
+    # (seg_id, name,                                       has_duration)   # hex
+    (1,       'Content Identification',                    False),         # 0x01
+    (16,      'Program Start',                             False),         # 0x10
+    (17,      'Program End',                               False),         # 0x11
+    (32,      'Chapter Start',                             False),         # 0x20
+    (33,      'Chapter End',                               False),         # 0x21
+    (34,      'Break Start',                               True),          # 0x22
+    (35,      'Break End',                                 False),         # 0x23
+    (48,      'Provider Advertisement Start',              True),          # 0x30
+    (49,      'Provider Advertisement End',                False),         # 0x31
+    (50,      'Distributor Advertisement Start',           True),          # 0x32
+    (51,      'Distributor Advertisement End',             False),         # 0x33
+    (52,      'Provider Placement Opportunity Start',      True),          # 0x34
+    (53,      'Provider Placement Opportunity End',        False),         # 0x35
+    (54,      'Distributor Placement Opportunity Start',   True),          # 0x36
+    (55,      'Distributor Placement Opportunity End',     False),         # 0x37
+)
+
+
+def _scte_logger_walk_descriptors(slice_info, command_type, pts):
+    """
+    Walk slice_info descriptors and emit one INFO log per recognized seg_type.
+
+    Used by SCTELogger for both command_type=5 and command_type=6. Duration is
+    only extracted for seg_types flagged has_duration=True in the seg-type table.
+    """
+    descriptors = slice_info.get('descriptors', [])
+    if not descriptors:
+        slicer.SlicerLogger(
+            'WARN',
+            f'[upl-py_Warn] SCTELogger: no descriptors in command_type={command_type}'
+        )
+        return
+
+    seg_type_list = [d.get('segmentation_type_id') for d in descriptors]
+
+    for seg_id, seg_name, has_duration in _SCTE_SEG_TYPES:
+        if seg_id not in seg_type_list:
+            continue
+        index = seg_type_list.index(seg_id)
+        upid_bytes = descriptors[index].get('segmentation_upid', b'')
+        try:
+            upid = str(upid_bytes, 'utf-8') if upid_bytes else ''
+        except Exception as e:
+            slicer.SlicerLogger(
+                'WARN',
+                f'[upl-py_Warn] SCTELogger: seg_id={seg_id} upid decode failed: {e}'
+            )
+            upid = f'<undecodable: {upid_bytes!r}>'
+
+        if has_duration:
+            duration = break_dur(slice_info, index)
+            approx_duration_in_seconds = adis(duration, 0)
+            slicer.SlicerLogger(
+                'INFO',
+                f'[upl-py] SCTELogger: command_type={command_type} '
+                f'seg_id={seg_id} (0x{seg_id:02x}, {seg_name}) upid={upid} pts={pts} '
+                f'duration_s={approx_duration_in_seconds}'
+            )
+        else:
+            slicer.SlicerLogger(
+                'INFO',
+                f'[upl-py] SCTELogger: command_type={command_type} '
+                f'seg_id={seg_id} (0x{seg_id:02x}, {seg_name}) upid={upid} pts={pts}'
+            )
+
+
+def SCTELogger(slice_info, slicer_id):
+    """
+    Diagnostic channel_group method — logs the parsed SCTE packet without
+    changing slicer state.
+
+    Enable by setting `channel_group: scte_logger` in uplynk.conf. Useful for
+    observing an unfamiliar upstream feed before writing a channel-specific
+    method, or for A/B comparing what the plugin sees vs what the automation
+    system claims it sent.
+
+    Handles:
+        command_type=5 (splice_insert)  — logs OON state, duration, descriptors
+        command_type=6 (time_signal)    — logs each descriptor's seg_type
+
+    Args:
+        slice_info: The SCTE bridge object.
+        slicer_id: This slicer's ID (from slicer.GetStatus).
+    """
+    channel_group = SLICER_STATUS_DICT.get('channel_group', 'scte_logger')
+    slicer.SlicerLogger(
+        'INFO',
+        f'[upl-py_Method] SCTELogger active: channel_group={channel_group} slicer_id={slicer_id}'
+    )
+
+    try:
+        command_type = slice_info.get('splice_command_type')
+        pts = slice_info.get('pts_time')
+
+        if command_type == 5:
+            command = slice_info.get('command', {})
+            oon = command.get('out_of_network_indicator', 0)
+            duration = break_dur_oon(slice_info) if 'duration' in command else 0
+            approx_duration_in_seconds = adis(duration, 0)
+            slicer.SlicerLogger(
+                'INFO',
+                f'[upl-py_OON] SCTELogger: command_type={command_type} '
+                f'oon={oon} pts={pts} duration_s={approx_duration_in_seconds}'
+            )
+            _scte_logger_walk_descriptors(slice_info, command_type, pts)
+
+        elif command_type == 6:
+            _scte_logger_walk_descriptors(slice_info, command_type, pts)
+
+        else:
+            slicer.SlicerLogger(
+                'WARN',
+                f'[upl-py_Warn] SCTELogger: unhandled command_type={command_type}'
+            )
+
+    except Exception as e:
+        slicer.SlicerLogger(
+            'ERROR',
+            f'[upl-py_Err] SCTELogger: {e}' + traceback.format_exc()
+        )

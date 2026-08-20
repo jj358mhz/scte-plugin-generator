@@ -1,0 +1,1194 @@
+{#-
+  scte_plugin.py.j2 — main entrypoint for a generated SCTE-35 plugin.
+
+  Renders Sections 1-5 (identity, imports, globals, helpers, async, entrypoints)
+  and then includes the per-method sub-templates for each entry in `methods`,
+  plus the always-emitted _method_scte_logger.py.j2.
+
+  Context expected:
+    plugin_name   (str, snake_case)
+    client_name   (str)
+    author        (str)
+    version       (str)
+    today         (str, ISO date)
+    methods       (list[dict])   — {preset, name, channel_group}
+    features      (set[str])     — {boundary_handling, eidr_routing, id3_writing}
+    has_linear    (bool)
+    has_live_event (bool)
+    has_oon       (bool)
+-#}
+"""
+{{ client_name }} SCTE-35 plugin.
+
+Methods:
+{%- for m in methods %}
+    {{ m.name }} — channel_group={{ m.channel_group }}, preset={{ m.preset }}
+{%- endfor %}
+    SCTELogger — channel_group=scte_logger (diagnostic, always available)
+
+Generated: {{ today }}
+
+Handles SCTE-35 signaling for {{ client_name }} on the Uplynk LiveSlicer platform.
+"""
+
+import inspect
+import os
+import resource
+import socket
+import time
+import traceback
+{% if has_live_event %}
+import json
+{% endif %}
+{% if 'id3_writing' in features %}
+import base64
+{% endif %}
+
+import requests
+import slicer
+
+{% if has_live_event %}
+from typing import Callable
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Version
+# -----------------------------------------------------------------------------
+
+PLUGIN_VERSION = '[{{ version }}] - {{ today }}'
+
+# -----------------------------------------------------------------------------
+# Boolean config parsing sentinels
+# -----------------------------------------------------------------------------
+
+_TRUTHY = ('1', 'true', 't', 'yes', 'y', 'on', 'enable', 'enabled')
+_FALSY  = ('0', 'false', 'f', 'no', 'n', 'off', 'disable', 'disabled', '', 'none', 'null')
+
+# -----------------------------------------------------------------------------
+# Execution time budget (seconds). Float comparison — do NOT stringify.
+# -----------------------------------------------------------------------------
+
+_EXEC_TIME_BUDGET = 0.250
+
+
+# =============================================================================
+# Module-level globals
+# =============================================================================
+
+# --- 1. Runtime identity ---
+PROC_ID = os.getpid()
+HOST = socket.gethostname()
+
+# --- 2. Status / config caches ---
+SLICER_STATUS_DICT = {}
+SLICER_CONFIG_DICT = {}
+
+# --- 3. Config parameter caches ---
+API_PORT = {}
+CALL_SIGN = {}
+DUR_OFF = {}
+PASSTHROUGH_MODE = {}
+PROFILE_GUID = {}
+PTS_OFF = {}
+SIGNAL_TYPE = {}
+SLICER_VERSION = {}
+STREAM_TYPE = {}
+
+# --- 4. Runtime toggles ---
+SCTE_LOG_VERBOSITY = '2'
+PLUGIN_MEMORY_LOGGING = False
+ZERO_DUR = False
+
+{% if has_linear %}
+# --- 5a. `linear` preset state ---
+OUTOFNETWORK_MODE = {}
+PROGRAM_START_VIA_SCTE_MODE = {}
+LOCAL_MODE = {}
+AD_SKIP_SPLICEINSERT = {}
+AD_SKIP_TIMESIGNAL = {}
+AD_BREAK_MODE = {}         # 'splice_insert' | 'time_signal' — mutually exclusive dispatch
+{% endif %}
+{% if 'boundary_handling' in features %}
+
+# --- 5b. `boundary_handling` feature state ---
+BOUNDARY_MODE = {}
+BOUNDARY_DUR_MAX = {}
+{% endif %}
+{% if has_oon %}
+
+# --- 5c. `oon` preset state (async WebCall + EPG enrichment) ---
+from enum import IntEnum
+
+
+class State(IntEnum):
+    INITIAL = -1
+    BLACKOUT = 0
+    SLICING = 1
+    AD = 2
+
+    def __str__(self):
+        return self.name.lower()
+
+
+PLUGIN_STATE = State.INITIAL
+PLUGIN_STATE_LASTMOD = 0.0
+PENDING_CALLS = {}
+AD_META_KEYS = {}
+API_URL = {}
+UAC_MODE = {}
+{% endif %}
+{% if has_live_event %}
+
+# --- 5d. `live_event_api` state (Disney lifecycle) ---
+LIVE_EVENT_ID = {}
+LIVE_EVENT_PAYLOAD = {}
+LIVE_EVENT_DATA = {}
+EXTERNAL_ID = []
+HANDLECALL_REQUEST_METADATA = {}
+SLICER_ID_MISMATCH = False
+TERMINAL_UPID = False
+BREAK_UPID_MISMATCH = False
+{% endif %}
+{% if 'eidr_routing' in features %}
+
+# --- 5e. `eidr_routing` feature state ---
+EIDR_LIST = {
+    'CABLE_NETS': {},
+    'FBC': {},
+    'LOCAL': {},
+}
+EIDR_MODE = {}
+BREAKAWAY_EXTID = ''
+{% endif %}
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Boolean config parsing
+# -----------------------------------------------------------------------------
+
+def _parse_bool_config(value, default=False):
+    """Tolerant parser for boolean-shaped config values."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return bool(value)
+    if isinstance(value, str):
+        v = value.strip().lower()
+        if v in _TRUTHY:
+            return True
+        if v in _FALSY:
+            return False
+    return default
+
+
+def _normalize_verbosity(raw, default='2'):
+    """Normalize a raw scte_log_verbosity config value to '1', '2', or '3'."""
+    v = str(raw).strip() if raw is not None else ''
+    if v in ('1', '2', '3'):
+        return v
+    return default
+
+
+# -----------------------------------------------------------------------------
+# Duration extraction helpers
+# -----------------------------------------------------------------------------
+
+def break_dur(slice_info, index):
+    """
+    Extract segmentation_duration from a Type 6 descriptor at `index`.
+
+    Returns 0 if the descriptor has no duration (e.g. END events). Value is
+    in base48k uPTS units.
+
+    Args:
+        slice_info (dict): The SCTE bridge object.
+        index (int): Position in the descriptors list.
+
+    Returns:
+        int: Duration in base48k uPTS, or 0 if absent.
+    """
+    try:
+        descriptors = slice_info.get('descriptors', [])
+        if index < 0 or index >= len(descriptors):
+            return 0
+        return int(descriptors[index].get('segmentation_duration', 0) or 0)
+    except Exception as e:
+        log(f'[upl-py_Err] break_dur({index}): {e}' + traceback.format_exc())
+        return 0
+
+
+def break_dur_oon(slice_info):
+    """
+    Extract duration from a Type 5 splice_insert command.
+
+    Type 5 stores its duration on the `command` object rather than on a
+    descriptor. Returns 0 for open-ended breaks (no duration_flag).
+
+    Args:
+        slice_info (dict): The SCTE bridge object.
+
+    Returns:
+        int: Duration in base48k uPTS, or 0 if absent.
+    """
+    try:
+        command = slice_info.get('command', {})
+        return int(command.get('duration', 0) or 0)
+    except Exception as e:
+        log(f'[upl-py_Err] break_dur_oon: {e}' + traceback.format_exc())
+        return 0
+
+
+def adis(duration, duration_offset):
+    """
+    Approximate Duration In Seconds — convert LiveSlicer base48k uPTS to seconds.
+
+    Used everywhere for human-readable duration logging. Applies
+    `duration_offset` from uplynk.conf before conversion. Returns 1 decimal
+    place, matching CNBC/Fox/P1Media plugin convention.
+
+    Args:
+        duration (int): Base48k uPTS.
+        duration_offset (int): Offset from dur_off_x() (may be negative).
+
+    Returns:
+        float: Approximate seconds, rounded to 1 decimal.
+    """
+    try:
+        return round((duration + duration_offset) / 48000.0, 1)
+    except Exception as e:
+        log(f'[upl-py_Err] adis({duration}, {duration_offset}): {e}' + traceback.format_exc())
+        return 0.0
+
+
+# -----------------------------------------------------------------------------
+# Logging
+# -----------------------------------------------------------------------------
+
+def log(message, **kwargs):
+    """
+    Emit a structured log line via slicer.SlicerLogger.
+
+    Verbosity gates SCTE_LOG_VERBOSITY:
+        '1' — plugin message only
+        '2' — + scte_message summary (default)
+        '3' — + scte_message + slicer_metrics
+    """
+    global SLICER_STATUS_DICT, SCTE_LOG_VERBOSITY
+
+    frame = inspect.currentframe()
+    caller_func = '-'
+    if frame is not None and frame.f_back is not None:
+        caller_func = frame.f_back.f_code.co_name
+
+    slicer_state = slicer.GetState()
+    scte_message = '-'
+    slicer_metrics = '-'
+
+    if SCTE_LOG_VERBOSITY == '2':
+        scte_message = SLICER_STATUS_DICT.get('scte_message', {}).get('repr', '-')
+    elif SCTE_LOG_VERBOSITY == '3':
+        scte_message = SLICER_STATUS_DICT.get('scte_message', {}).get('repr', '-')
+        slicer_metrics = get_slicer_metrics()
+
+    boundary_name = kwargs.get('boundary_name', '-')
+    call_sign = kwargs.get('call_sign', '-')
+    channel_group = SLICER_STATUS_DICT.get('channel_group', '-')
+    command_type = kwargs.get('command_type', '-')
+    oon = kwargs.get('oon', '-')
+    segmentation_type_id = kwargs.get('segmentation_type_id', '-')
+    slicer_id = SLICER_STATUS_DICT.get('slicer_id', '-')
+    slicer_version = kwargs.get('slicer_version', '-')
+    stream_type = kwargs.get('stream_type', '-')
+
+    slicer.SlicerLogger(
+        'INFO',
+        f'[upl-py] host={HOST} pid={PROC_ID} caller={caller_func} '
+        f'channel_group={channel_group} slicer_id={slicer_id} call_sign={call_sign} '
+        f'stream_type={stream_type} plugin_version={PLUGIN_VERSION} command_type={command_type} '
+        f'segmentation_type_id={segmentation_type_id} boundary_name={boundary_name} '
+        f'oon={oon} slicer_state={slicer_state} slicer_version={slicer_version} '
+        f'message={message} scte_message={scte_message} slicer_metrics={slicer_metrics}'
+    )
+
+
+def get_slicer_metrics(api_port=None):
+    """Fetch slicer status for verbosity='3'. Never raises."""
+    if api_port is None:
+        api_port = get_api_port()
+    try:
+        response = requests.get(f'http://localhost:{api_port}/status', timeout=1.0)
+        return str(response.json())
+    except Exception as e:
+        return f'- (metrics fetch failed: {e})'
+
+
+# -----------------------------------------------------------------------------
+# Config parsers (baseline)
+# -----------------------------------------------------------------------------
+
+def call_sign_id(call_sign=None):
+    """Extract call_sign from uplynk.conf. Cached."""
+    global CALL_SIGN
+    if call_sign in CALL_SIGN:
+        return CALL_SIGN[call_sign]
+    try:
+        value = SLICER_CONFIG_DICT.get('call_sign', '-')
+        CALL_SIGN[call_sign] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] call_sign_id: {e}' + traceback.format_exc())
+        return '-'
+
+
+def gain_value(gain=None):
+    """Extract gain from uplynk.conf."""
+    try:
+        return SLICER_CONFIG_DICT.get('gain', '-')
+    except Exception as e:
+        log(f'[upl-py_Err] gain_value: {e}' + traceback.format_exc())
+        return '-'
+
+
+def get_api_port(api_port=None):
+    """Extract api_port from uplynk.conf. Cached. Default 65009."""
+    global API_PORT
+    if api_port in API_PORT:
+        return API_PORT[api_port]
+    try:
+        value = int(SLICER_CONFIG_DICT.get('api_port', 65009))
+        API_PORT[api_port] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] get_api_port: {e}' + traceback.format_exc())
+        return 65009
+
+
+def pts_off_x(off):
+    """Extract per-SCTE-type PTS offset. Cached per type."""
+    global PTS_OFF
+    if off in PTS_OFF:
+        return PTS_OFF[off]
+    try:
+        key = f'pts_offset_{off}'
+        value = int(SLICER_CONFIG_DICT.get(key, 0))
+        PTS_OFF[off] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] pts_off_x({off}): {e}' + traceback.format_exc())
+        return 0
+
+
+def dur_off_x(off):
+    """Extract per-SCTE-type duration offset. Cached per type."""
+    global DUR_OFF
+    if off in DUR_OFF:
+        return DUR_OFF[off]
+    try:
+        key = f'duration_offset_{off}'
+        value = int(SLICER_CONFIG_DICT.get(key, 0))
+        DUR_OFF[off] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] dur_off_x({off}): {e}' + traceback.format_exc())
+        return 0
+
+
+def pt_mode(passthrough_mode=None):
+    """Parse passthrough_mode. Boolean. Cached."""
+    global PASSTHROUGH_MODE
+    if passthrough_mode in PASSTHROUGH_MODE:
+        return PASSTHROUGH_MODE[passthrough_mode]
+    try:
+        raw = SLICER_CONFIG_DICT.get('passthrough_mode', False)
+        value = _parse_bool_config(raw, default=False)
+        PASSTHROUGH_MODE[passthrough_mode] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] pt_mode: {e}' + traceback.format_exc())
+        return False
+
+
+def profile_id(current_profile=None):
+    """Extract profile GUID. Cached."""
+    global PROFILE_GUID
+    if current_profile in PROFILE_GUID:
+        return PROFILE_GUID[current_profile]
+    try:
+        value = SLICER_CONFIG_DICT.get('profile', '-')
+        PROFILE_GUID[current_profile] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] profile_id: {e}' + traceback.format_exc())
+        return '-'
+
+
+def signal_type(signal=None):
+    """Extract signal_type. Cached."""
+    global SIGNAL_TYPE
+    if signal in SIGNAL_TYPE:
+        return SIGNAL_TYPE[signal]
+    try:
+        value = SLICER_CONFIG_DICT.get('signal_type', '-')
+        SIGNAL_TYPE[signal] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] signal_type: {e}' + traceback.format_exc())
+        return '-'
+
+
+def slicer_ver(slicer_version=None):
+    """Extract slicer_version. Cached."""
+    global SLICER_VERSION
+    if slicer_version in SLICER_VERSION:
+        return SLICER_VERSION[slicer_version]
+    try:
+        value = SLICER_CONFIG_DICT.get('slicer_version', '-')
+        SLICER_VERSION[slicer_version] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] slicer_ver: {e}' + traceback.format_exc())
+        return '-'
+
+
+def stream_type_id(stream_type=None):
+    """Extract stream_type. Cached."""
+    global STREAM_TYPE
+    if stream_type in STREAM_TYPE:
+        return STREAM_TYPE[stream_type]
+    try:
+        value = SLICER_CONFIG_DICT.get('stream_type', '-')
+        STREAM_TYPE[stream_type] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] stream_type_id: {e}' + traceback.format_exc())
+        return '-'
+
+
+{% if 'boundary_handling' in features %}
+# -----------------------------------------------------------------------------
+# Boundary handling parsers
+# -----------------------------------------------------------------------------
+
+def boundary_mode(use_boundary=None):
+    """Parse use_boundary + per-source names. Populates BOUNDARY_MODE dict."""
+    global BOUNDARY_MODE
+    if use_boundary in BOUNDARY_MODE:
+        return BOUNDARY_MODE[use_boundary]
+    try:
+        raw = SLICER_CONFIG_DICT.get('use_boundary', False)
+        value = _parse_bool_config(raw, default=False)
+        BOUNDARY_MODE[use_boundary] = value
+        BOUNDARY_MODE['boundary_name_oon']      = SLICER_CONFIG_DICT.get('boundary_name_oon', '-')
+        BOUNDARY_MODE['boundary_name_local']    = SLICER_CONFIG_DICT.get('boundary_name_local', '-')
+        BOUNDARY_MODE['boundary_name_national'] = SLICER_CONFIG_DICT.get('boundary_name_national', '-')
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] boundary_mode: {e}' + traceback.format_exc())
+        return False
+
+
+def boundary_duration_max():
+    """Cap duration for boundary mode. 0 = no cap."""
+    global BOUNDARY_DUR_MAX
+    if 'value' in BOUNDARY_DUR_MAX:
+        return BOUNDARY_DUR_MAX['value']
+    try:
+        value = int(SLICER_CONFIG_DICT.get('boundary_duration_max', 0))
+        BOUNDARY_DUR_MAX['value'] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] boundary_duration_max: {e}' + traceback.format_exc())
+        return 0
+
+
+def boundary_name_for(seg_id):
+    """
+    Resolve boundary name for a seg_id.
+
+    Lookup order:
+        1. boundary_name_<seg_id> config key
+        2. Legacy boundary_name_local/_national/_oon convention
+        3. f'boundary_{seg_id}' synthesized default
+    """
+    override = SLICER_CONFIG_DICT.get(f'boundary_name_{seg_id}')
+    if override:
+        return override
+    if seg_id == 54:
+        return BOUNDARY_MODE.get('boundary_name_local') or f'boundary_{seg_id}'
+    if seg_id in (34, 48):
+        return BOUNDARY_MODE.get('boundary_name_national') or f'boundary_{seg_id}'
+    if seg_id == 501:  # OON=1 synthetic key
+        return BOUNDARY_MODE.get('boundary_name_oon') or f'boundary_{seg_id}'
+    return f'boundary_{seg_id}'
+{% endif %}
+{% if has_linear %}
+# -----------------------------------------------------------------------------
+# Linear preset parsers
+# -----------------------------------------------------------------------------
+
+def oon_mode(outofnetwork_mode=None):
+    """Parse outofnetwork_mode. Cached."""
+    global OUTOFNETWORK_MODE
+    if outofnetwork_mode in OUTOFNETWORK_MODE:
+        return OUTOFNETWORK_MODE[outofnetwork_mode]
+    try:
+        raw = SLICER_CONFIG_DICT.get('outofnetwork_mode', False)
+        value = _parse_bool_config(raw, default=False)
+        OUTOFNETWORK_MODE[outofnetwork_mode] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] oon_mode: {e}' + traceback.format_exc())
+        return False
+
+
+def pgm_start_mode(pgm_start_via_scte=None):
+    """Parse program_start_via_scte_mode. Gates whether Type 16 fires ContentStart."""
+    global PROGRAM_START_VIA_SCTE_MODE
+    if pgm_start_via_scte in PROGRAM_START_VIA_SCTE_MODE:
+        return PROGRAM_START_VIA_SCTE_MODE[pgm_start_via_scte]
+    try:
+        raw = SLICER_CONFIG_DICT.get('program_start_via_scte_mode', True)
+        value = _parse_bool_config(raw, default=True)
+        PROGRAM_START_VIA_SCTE_MODE[pgm_start_via_scte] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] pgm_start_mode: {e}' + traceback.format_exc())
+        return True
+
+
+def local_mode(mode=None):
+    """Parse local_mode. Tri-state: 'local' | 'national' | 'oon'."""
+    global LOCAL_MODE
+    if mode in LOCAL_MODE:
+        return LOCAL_MODE[mode]
+    try:
+        value = str(SLICER_CONFIG_DICT.get('local_mode', 'national')).strip().lower()
+        if value not in ('local', 'national', 'oon'):
+            log(f'[upl-py_Warn] local_mode: unrecognized value {value!r}, defaulting to national')
+            value = 'national'
+        LOCAL_MODE[mode] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] local_mode: {e}' + traceback.format_exc())
+        return 'national'
+
+
+def ad_break_mode(mode=None):
+    """
+    Parse scte_ad_break_mode. 'splice_insert' | 'time_signal'.
+
+    Selects which SCTE command type drives ad breaks:
+        splice_insert — command_type=5 with OON indicator
+        time_signal   — command_type=6 with seg IDs 34/35, 48/49, 54/55
+    """
+    global AD_BREAK_MODE
+    if mode in AD_BREAK_MODE:
+        return AD_BREAK_MODE[mode]
+    try:
+        value = str(SLICER_CONFIG_DICT.get('scte_ad_break_mode', 'splice_insert')).strip().lower()
+        if value not in ('splice_insert', 'time_signal'):
+            log(f'[upl-py_Warn] ad_break_mode: unrecognized value {value!r}, defaulting to splice_insert')
+            value = 'splice_insert'
+        AD_BREAK_MODE[mode] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] ad_break_mode: {e}' + traceback.format_exc())
+        return 'splice_insert'
+
+
+def ad_skip_spliceinsert(skip_flag=None):
+    """Parse ad_skip_spliceinsert. When True, all command_type=5 events are skipped."""
+    global AD_SKIP_SPLICEINSERT
+    if skip_flag in AD_SKIP_SPLICEINSERT:
+        return AD_SKIP_SPLICEINSERT[skip_flag]
+    try:
+        raw = SLICER_CONFIG_DICT.get('ad_skip_spliceinsert', False)
+        value = _parse_bool_config(raw, default=False)
+        AD_SKIP_SPLICEINSERT[skip_flag] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] ad_skip_spliceinsert: {e}' + traceback.format_exc())
+        return False
+
+
+def ad_skip_timesignal(skip_flag=None):
+    """Parse ad_skip_timesignal. When True, all command_type=6 events are skipped."""
+    global AD_SKIP_TIMESIGNAL
+    if skip_flag in AD_SKIP_TIMESIGNAL:
+        return AD_SKIP_TIMESIGNAL[skip_flag]
+    try:
+        raw = SLICER_CONFIG_DICT.get('ad_skip_timesignal', False)
+        value = _parse_bool_config(raw, default=False)
+        AD_SKIP_TIMESIGNAL[skip_flag] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] ad_skip_timesignal: {e}' + traceback.format_exc())
+        return False
+{% endif %}
+{% if has_oon %}
+# -----------------------------------------------------------------------------
+# OON preset parsers (async WebCall + EPG enrichment)
+# -----------------------------------------------------------------------------
+
+def api_url(key=None):
+    """Extract api_url_<key> values. Cached per key."""
+    global API_URL
+    if key in API_URL:
+        return API_URL[key]
+    try:
+        value = SLICER_CONFIG_DICT.get(f'api_url_{key}', '-')
+        API_URL[key] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] api_url({key}): {e}' + traceback.format_exc())
+        return '-'
+
+
+def ad_meta_keys():
+    """Extract AdMeta key name mappings. Cached."""
+    global AD_META_KEYS
+    if 'content_id' in AD_META_KEYS:
+        return AD_META_KEYS
+    try:
+        AD_META_KEYS['content_id']    = SLICER_CONFIG_DICT.get('ad_meta_key_content_id',    'content_id')
+        AD_META_KEYS['content_title'] = SLICER_CONFIG_DICT.get('ad_meta_key_content_title', 'content_title')
+        AD_META_KEYS['pod_duration']  = SLICER_CONFIG_DICT.get('ad_meta_key_pod_duration',  'pod_duration')
+        return AD_META_KEYS
+    except Exception as e:
+        log(f'[upl-py_Err] ad_meta_keys: {e}' + traceback.format_exc())
+        return {'content_id': 'content_id', 'content_title': 'content_title', 'pod_duration': 'pod_duration'}
+
+
+def meta_key(name):
+    """Thin wrapper for slicer.AdMeta() call sites."""
+    return ad_meta_keys().get(name, name)
+
+
+def uac_mode(mode=None):
+    """Parse uac_mode. Boolean. Cached."""
+    global UAC_MODE
+    if mode in UAC_MODE:
+        return UAC_MODE[mode]
+    try:
+        raw = SLICER_CONFIG_DICT.get('uac_mode', False)
+        value = _parse_bool_config(raw, default=False)
+        UAC_MODE[mode] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] uac_mode: {e}' + traceback.format_exc())
+        return False
+{% endif %}
+{% if 'eidr_routing' in features %}
+# -----------------------------------------------------------------------------
+# EIDR routing helpers
+# -----------------------------------------------------------------------------
+
+def eidr_mode(eidr_upid):
+    """Set EIDR bucket by UPID: CABLE_NETS | FBC | LOCAL | None."""
+    global EIDR_MODE
+    if eidr_upid in EIDR_LIST['CABLE_NETS']:
+        EIDR_MODE = 'CABLE_NETS'
+    elif eidr_upid in EIDR_LIST['FBC']:
+        EIDR_MODE = 'FBC'
+    elif eidr_upid in EIDR_LIST['LOCAL']:
+        EIDR_MODE = 'LOCAL'
+    else:
+        EIDR_MODE = None
+    return EIDR_MODE
+
+
+def eidr_name_lookup(eidr_val):
+    """Resolve EIDR UPID to network name across all buckets."""
+    for bucket in ('CABLE_NETS', 'FBC', 'LOCAL'):
+        if eidr_val in EIDR_LIST[bucket]:
+            return EIDR_LIST[bucket][eidr_val]
+    return None
+
+
+def eidr_upid_lookup(slice_info):
+    """Scan slice_info descriptors for '10.5239'-prefixed UPID."""
+    try:
+        for descriptor in slice_info.get('descriptors', []):
+            upid_bytes = descriptor.get('segmentation_upid', b'')
+            if not upid_bytes:
+                continue
+            upid = str(upid_bytes, 'UTF-8')
+            if upid.startswith('10.5239'):
+                return upid
+    except Exception as e:
+        log(f'[upl-py_Err] eidr_upid_lookup: {e}' + traceback.format_exc())
+    return None
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# UPID trim helper — client-specific override
+# -----------------------------------------------------------------------------
+
+def trim_upid(desc):
+    """
+    Client-specific UPID prefix stripping. Override per plugin.
+
+    Default returns the UPID unchanged. Common transforms:
+        - Strip a client prefix ('FOX-', 'CNBC:', etc.)
+        - Split on delimiter, take one field
+        - Base64-decode
+    """
+    # TODO({{ client_name }}): implement client-specific UPID trim rules
+    return desc
+
+
+{% if has_live_event %}
+# =============================================================================
+# Live Event API — async helpers
+# =============================================================================
+
+LIVE_EVENT_END_URL            = 'api2/liveevents2/end'
+LIVE_EVENT_GET_URL            = 'api2/liveevents2/get'
+LIVE_EVENT_START_BY_EXTID_URL = 'api2/liveevents2/start-by-extid'
+LIVE_EVENT_UPDATE_URL         = 'api2/liveevents2/update'
+
+
+def get_event_payload(external_id: str, slicer_id: str, callback: Callable) -> None:
+    """Async fetch of Live Event payload. Failure sentinel: {'events': [], 'error': msg}."""
+    global HANDLECALL_REQUEST_METADATA
+    try:
+        params = {'external_id': external_id, 'slicer_id': slicer_id}
+        request_id = slicer.APICall(LIVE_EVENT_GET_URL, params)
+        HANDLECALL_REQUEST_METADATA[request_id] = {
+            'kind': 'get_event_payload',
+            'external_id': external_id,
+            'slicer_id': slicer_id,
+            'callback': callback,
+        }
+        log(f'[upl-py_LE] get_event_payload dispatched request_id={request_id} external_id={external_id}')
+    except Exception as e:
+        log(f'[upl-py_Err] get_event_payload: {e}' + traceback.format_exc())
+        try:
+            callback({'events': [], 'error': str(e)})
+        except Exception as cb_e:
+            log(f'[upl-py_Err] get_event_payload sync-fail callback: {cb_e}' + traceback.format_exc())
+
+
+def start_event(external_id: str, slicer_id: str, callback: Callable,
+                pts: int, pts_offset: int) -> None:
+    """Async start of Live Event + immediate ContentStart. Failure sentinel: None."""
+    global HANDLECALL_REQUEST_METADATA
+    try:
+        slicer.ContentStart(int(pts + pts_offset), f'{slicer_id} - {external_id}', external_id)
+        log(f'[upl-py_Cs] start_event: ContentStart at {pts + pts_offset} pts external_id={external_id}')
+
+        params = {'external_id': external_id, 'slicer_id': slicer_id}
+        request_id = slicer.APICall(LIVE_EVENT_START_BY_EXTID_URL, params)
+        HANDLECALL_REQUEST_METADATA[request_id] = {
+            'kind': 'start_event',
+            'external_id': external_id,
+            'slicer_id': slicer_id,
+            'callback': callback,
+        }
+        log(f'[upl-py_LE] start_event dispatched request_id={request_id} external_id={external_id}')
+    except Exception as e:
+        log(f'[upl-py_Err] start_event: {e}' + traceback.format_exc())
+        try:
+            callback(None)
+        except Exception as cb_e:
+            log(f'[upl-py_Err] start_event sync-fail callback: {cb_e}' + traceback.format_exc())
+
+
+def terminal_event_end(external_id: str, live_event_id: str,
+                       end_time_epoch: int, callback: Callable) -> None:
+    """Async terminal end of Live Event. Failure sentinel: {'events': [], 'error': msg}."""
+    global HANDLECALL_REQUEST_METADATA
+    try:
+        params = {'id': live_event_id, 'end_time_epoch': end_time_epoch}
+        request_id = slicer.APICall(LIVE_EVENT_END_URL, params)
+        HANDLECALL_REQUEST_METADATA[request_id] = {
+            'kind': 'terminal_event_end',
+            'external_id': external_id,
+            'live_event_id': live_event_id,
+            'callback': callback,
+        }
+        log(f'[upl-py_LE] terminal_event_end dispatched request_id={request_id} live_event_id={live_event_id}')
+    except Exception as e:
+        log(f'[upl-py_Err] terminal_event_end: {e}' + traceback.format_exc())
+        try:
+            callback({'events': [], 'error': str(e)})
+        except Exception as cb_e:
+            log(f'[upl-py_Err] terminal_event_end sync-fail callback: {cb_e}' + traceback.format_exc())
+
+
+def terminal_event_end_cancel(external_id: str, live_event_id: str,
+                              callback: Callable) -> None:
+    """Async cancellation of pending end. Failure sentinel: {'events': [], 'error': msg}."""
+    global HANDLECALL_REQUEST_METADATA
+    try:
+        params = {'id': live_event_id, 'action': 'cancel_end'}
+        request_id = slicer.APICall(LIVE_EVENT_UPDATE_URL, params)
+        HANDLECALL_REQUEST_METADATA[request_id] = {
+            'kind': 'terminal_event_end_cancel',
+            'external_id': external_id,
+            'live_event_id': live_event_id,
+            'callback': callback,
+        }
+        log(f'[upl-py_LE] terminal_event_end_cancel dispatched request_id={request_id} live_event_id={live_event_id}')
+    except Exception as e:
+        log(f'[upl-py_Err] terminal_event_end_cancel: {e}' + traceback.format_exc())
+        try:
+            callback({'events': [], 'error': str(e)})
+        except Exception as cb_e:
+            log(f'[upl-py_Err] terminal_event_end_cancel sync-fail callback: {cb_e}' + traceback.format_exc())
+
+
+def terminal_event_update(external_id: str, start_time_epoch: int,
+                          callback: Callable) -> None:
+    """Async update of expected_start time. Failure sentinel: {'events': [], 'error': msg}."""
+    global HANDLECALL_REQUEST_METADATA
+    try:
+        params = {'external_id': external_id, 'expected_start': start_time_epoch}
+        request_id = slicer.APICall(LIVE_EVENT_UPDATE_URL, params)
+        HANDLECALL_REQUEST_METADATA[request_id] = {
+            'kind': 'terminal_event_update',
+            'external_id': external_id,
+            'callback': callback,
+        }
+        log(f'[upl-py_LE] terminal_event_update dispatched request_id={request_id} external_id={external_id}')
+    except Exception as e:
+        log(f'[upl-py_Err] terminal_event_update: {e}' + traceback.format_exc())
+        try:
+            callback({'events': [], 'error': str(e)})
+        except Exception as cb_e:
+            log(f'[upl-py_Err] terminal_event_update sync-fail callback: {cb_e}' + traceback.format_exc())
+
+
+def _type16_callback(event_payload: dict) -> None:
+    """Callback for get_event_payload following Type 16 SCTE event."""
+    global EXTERNAL_ID, LIVE_EVENT_DATA, LIVE_EVENT_PAYLOAD, SLICER_ID_MISMATCH
+
+    try:
+        external_id = EXTERNAL_ID[-1]
+    except IndexError:
+        log('[upl-py_Err] _type16_callback: EXTERNAL_ID list is empty, cannot dispatch downstream')
+        return
+
+    LIVE_EVENT_PAYLOAD[external_id] = event_payload
+
+    events = event_payload.get('events', [])
+    if not events:
+        err = event_payload.get('error', 'no events returned')
+        log(f'[upl-py_Err] _type16_callback: no events for external_id={external_id} err={err}')
+        return
+
+    slicer_id = SLICER_STATUS_DICT.get('slicer_id', '')
+    for event in events:
+        for conflict in event.get('conflicts', []):
+            conflict_slicer = conflict.get('slicer_id')
+            if conflict_slicer and conflict_slicer != slicer_id:
+                SLICER_ID_MISMATCH = True
+                log(f'[upl-py_Err] _type16_callback: slicer_id mismatch '
+                    f'external_id={external_id} expected={slicer_id} '
+                    f'conflict={conflict_slicer} — NOT starting event')
+                return
+
+    LIVE_EVENT_DATA = events[0]
+
+    start_time_epoch = int(time.time() * 1000) + 1000
+
+    terminal_event_update(external_id, start_time_epoch, _terminal_update_cb)
+    pts = _TYPE16_PTS_CACHE.get('pts', 0)
+    pts_offset = _TYPE16_PTS_CACHE.get('pts_offset', 0)
+    start_event(external_id, slicer_id, _start_event_cb, pts, pts_offset)
+
+
+def _terminal_update_cb(payload: dict) -> None:
+    """Log-only callback for terminal_event_update."""
+    events = payload.get('events', [])
+    if not events:
+        err = payload.get('error', 'no events returned')
+        log(f'[upl-py_Warn] _terminal_update_cb: update failed err={err}')
+    else:
+        log('[upl-py_CB] _terminal_update_cb: update ok')
+
+
+def _start_event_cb(live_event_id) -> None:
+    """Callback for start_event — populates LIVE_EVENT_ID and defensively re-fires ContentStart."""
+    global LIVE_EVENT_ID
+    try:
+        external_id = EXTERNAL_ID[-1]
+    except IndexError:
+        log('[upl-py_Err] _start_event_cb: EXTERNAL_ID list is empty')
+        return
+
+    if not live_event_id:
+        log(f'[upl-py_Err] _start_event_cb: no live_event_id returned for external_id={external_id}')
+        return
+
+    LIVE_EVENT_ID[external_id] = live_event_id
+    log(f'[upl-py_CBCS] _start_event_cb: LIVE_EVENT_ID[{external_id}]={live_event_id}')
+
+    if slicer.GetState() != 'slicing':
+        pts = _TYPE16_PTS_CACHE.get('pts', 0)
+        pts_offset = _TYPE16_PTS_CACHE.get('pts_offset', 0)
+        slicer_id = SLICER_STATUS_DICT.get('slicer_id', '')
+        log(f'[upl-py_Warn] _start_event_cb: slicer state != slicing, forcing ContentStart + FlushBreakMeta')
+        slicer.ContentStart(int(pts + pts_offset), f'{slicer_id} - {external_id}', external_id)
+        slicer.FlushBreakMeta(int(pts + pts_offset))
+
+
+# PTS cache for Type 16 async handoff.
+_TYPE16_PTS_CACHE = {'pts': 0, 'pts_offset': 0}
+
+
+# -----------------------------------------------------------------------------
+# HandleCall dispatcher
+# -----------------------------------------------------------------------------
+
+def _dispatch_handlecall(request_id: int, response) -> None:
+    """Route async API response to registered callback."""
+    global HANDLECALL_REQUEST_METADATA
+
+    metadata = HANDLECALL_REQUEST_METADATA.pop(request_id, None)
+    if metadata is None:
+        log(f'[upl-py_Err] _dispatch_handlecall: unrecognized request_id={request_id}')
+        return
+
+    kind = metadata.get('kind', 'unknown')
+    callback = metadata.get('callback')
+    if callback is None:
+        log(f'[upl-py_Err] _dispatch_handlecall: no callback for request_id={request_id} kind={kind}')
+        return
+
+    parsed = None
+    parse_error = None
+    try:
+        if isinstance(response, (dict, list)):
+            parsed = response
+        elif isinstance(response, (bytes, bytearray)):
+            parsed = json.loads(response.decode('utf-8'))
+        elif isinstance(response, str):
+            parsed = json.loads(response)
+        else:
+            parse_error = f'unexpected response type: {type(response).__name__}'
+    except Exception as e:
+        parse_error = f'{e}'
+
+    if parse_error is not None:
+        log(f'[upl-py_Err] _dispatch_handlecall: parse failed for request_id={request_id} '
+            f'kind={kind} err={parse_error}')
+        try:
+            if kind == 'start_event':
+                callback(None)
+            else:
+                callback({'events': [], 'error': parse_error})
+        except Exception as cb_e:
+            log(f'[upl-py_Err] _dispatch_handlecall: failure-sentinel callback raised '
+                f'kind={kind} err={cb_e}' + traceback.format_exc())
+        return
+
+    try:
+        if kind == 'start_event':
+            assert isinstance(parsed, dict)
+            events = parsed.get('events', [])
+            if not events:
+                log(f'[upl-py_Err] _dispatch_handlecall: start_event returned no events request_id={request_id}')
+                callback(None)
+                return
+            event_id = events[0].get('id')
+            if not event_id:
+                log(f'[upl-py_Err] _dispatch_handlecall: start_event event has no id request_id={request_id}')
+                callback(None)
+                return
+            callback(event_id)
+            log(f'[upl-py_CB] _dispatch_handlecall: kind={kind} request_id={request_id} dispatched with event_id={event_id}')
+        else:
+            callback(parsed)
+            log(f'[upl-py_CB] _dispatch_handlecall: kind={kind} request_id={request_id} dispatched')
+    except Exception as e:
+        log(f'[upl-py_Err] _dispatch_handlecall: callback raised kind={kind} err={e}' + traceback.format_exc())
+
+
+def le_epoch_times(pts: int) -> dict:
+    """Compute Live Event epoch timestamps from a base48k uPTS value."""
+    now_epoch_ms = int(time.time() * 1000)
+    pts_epoch_ms = int(pts / 48.0)  # pts / 48000 * 1000
+    return {'now_epoch_ms': now_epoch_ms, 'pts_epoch_ms': pts_epoch_ms}
+{% endif %}
+{% if 'id3_writing' in features %}
+# =============================================================================
+# ID3 file writer
+# =============================================================================
+
+def id3_to_file(pts: int, external_id: str, output_dir: str = '/tmp') -> str:
+    """Write an ID3 tag file for Type 16 events. Returns path or '' on failure."""
+    try:
+        payload = {
+            'external_id': external_id,
+            'pts': pts,
+            'epoch_ms': int(time.time() * 1000),
+        }
+        encoded = base64.b64encode(json.dumps(payload).encode('utf-8')).decode('ascii')
+        filename = f'{external_id}_{pts}.id3'
+        path = os.path.join(output_dir, filename)
+        with open(path, 'w') as f:
+            f.write(encoded)
+        log(f'[upl-py_ID3] id3_to_file: wrote {path}')
+        return path
+    except Exception as e:
+        log(f'[upl-py_Err] id3_to_file: {e}' + traceback.format_exc())
+        return ''
+{% endif %}
+
+
+# =============================================================================
+# Required plugin entrypoints
+# =============================================================================
+
+def Initialize():
+    """Called once at plugin load time."""
+    slicer.SlicerLogger(
+        'INFO', f'[upl-py_Ver] {{ client_name }} SCTE Plugin version {PLUGIN_VERSION} initialized'
+    )
+    return slicer.Initialize()
+
+
+def Notify():
+    """Non-SCTE lifecycle notifications. Currently unused."""
+    return int(0)
+
+
+def HandleCall(origin_url=None, response=None, code=None, request_id=None):
+    """
+    Callback for async slicer.APICall() / slicer.WebCall() responses.
+
+    Uses default None args to preserve compat with 0-arg HandleCall stubs.
+    Returns int(0) per runtime contract.
+    """
+{% if has_live_event or has_oon %}
+    try:
+        if request_id is None:
+            log('[upl-py_HC] HandleCall: request_id is None, cannot dispatch')
+            return int(0)
+        if code is not None and code != 200:
+            log(f'[upl-py_Warn] HandleCall: non-200 code={code} '
+                f'origin_url={origin_url} request_id={request_id}')
+{% if has_live_event %}
+        if request_id in HANDLECALL_REQUEST_METADATA:
+            _dispatch_handlecall(request_id, response)
+            return int(0)
+{% endif %}
+{% if has_oon %}
+        if request_id in PENDING_CALLS:
+            _handle_epg_response(origin_url, response, code, request_id)
+            return int(0)
+{% endif %}
+        log(f'[upl-py_Err] HandleCall: no dispatcher matched request_id={request_id}')
+    except Exception as e:
+        slicer.SlicerLogger(
+            'ERROR', f'[upl-py_Err] HandleCall dispatch: {e}' + traceback.format_exc()
+        )
+{% endif %}
+    return int(0)
+
+
+def Process35(slice_info):
+    """
+    Called for every SCTE-35 packet on the input stream. SCTE-104 → SCTE-35 upstream.
+
+    Must complete within 250ms — runtime flags overruns as errors.
+    """
+    global SLICER_CONFIG_DICT, SLICER_STATUS_DICT, SCTE_LOG_VERBOSITY, PLUGIN_MEMORY_LOGGING
+    try:
+        start_time = time.time()
+
+        # Duplicate SCTE check
+        prev = SLICER_STATUS_DICT.get('scte_message', {})
+        if prev and prev.get('base64') == slice_info.get('base64') and \
+                prev.get('pts_time', -1) == slice_info.get('pts_time', -1):
+            slicer.SlicerLogger('INFO', '[upl-py_35] Skipping duplicate SCTE')
+            return int(0)
+
+        slicer_values = slicer.GetStatus()
+        config = slicer_values.get('config', {})
+        channel_group = config.get('channel_group')
+        slicer_id = slicer_values.get('slicerID')
+
+        # Leak-safe summary dict — NEVER the raw slice_info bridge object
+        SLICER_STATUS_DICT.update({
+            'channel_group': channel_group,
+            'slicer_id': slicer_id,
+            'scte_message': {
+                'base64': slice_info.get('base64'),
+                'pts_time': slice_info.get('pts_time', -1),
+                'repr': str(slice_info),
+            },
+        })
+        slicer.SlicerLogger('INFO', f'[upl-py_Dict] SLICER_STATUS_DICT values are {SLICER_STATUS_DICT}')
+
+        # Redacted config copy — {**config} avoids aliased mutation of runtime's dict
+        SLICER_CONFIG_DICT = {**config, 'apikey': 'REDACTED'}
+        slicer.SlicerLogger('INFO', f'[upl-py_Dict] SLICER_CONFIG_DICT values are {SLICER_CONFIG_DICT}')
+
+        SCTE_LOG_VERBOSITY = _normalize_verbosity(config.get('scte_log_verbosity'), SCTE_LOG_VERBOSITY)
+        PLUGIN_MEMORY_LOGGING = _parse_bool_config(
+            config.get('plugin_memory_logging', PLUGIN_MEMORY_LOGGING),
+            default=False,
+        )
+
+        # Memory usage sample (always compiled, runtime-toggled)
+        if PLUGIN_MEMORY_LOGGING:
+            rss_mb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1024
+            slicer.SlicerLogger(
+                'INFO', f'[upl-py_Mem] slicer_id={slicer_id} max_rss_mb={rss_mb:.1f}'
+            )
+
+        # Dispatch to channel-group method
+        if channel_group == 'scte_logger':
+            SCTELogger(slice_info, slicer_id)
+        {%- for m in methods %}
+        elif channel_group == '{{ m.channel_group }}':
+            {{ m.name }}(slice_info, slicer_id)
+        {%- endfor %}
+        else:
+            slicer.SlicerLogger(
+                'WARN',
+                f'[upl-py_Warn] Unrecognized channel_group={channel_group}, '
+                f'expected one of: scte_logger{% for m in methods %}, {{ m.channel_group }}{% endfor %}'
+            )
+
+        # Execution-time guard — FLOAT compare, never stringify
+        ex_time = time.time() - start_time
+        if ex_time >= _EXEC_TIME_BUDGET:
+            slicer.SlicerLogger(
+                'ERROR',
+                f'[upl-py_Err] Plugin execution time exceeded {int(_EXEC_TIME_BUDGET * 1000)}ms budget. '
+                f'Execution time in seconds: {ex_time}'
+            )
+        else:
+            slicer.SlicerLogger('INFO', f'[upl-py_Time] Plugin execution time in seconds: {ex_time}')
+
+    except Exception as e:
+        slicer.SlicerLogger('ERROR', '[upl-py_Err] Exception in Process35 Method')
+        slicer.SlicerLogger(
+            'ERROR', f'[upl-py_Err] Exception: {e}' + traceback.format_exc()
+        )
+
+    return int(0)
+
+
+# =============================================================================
+# Channel-group methods
+# =============================================================================
+
+{% include '_method_scte_logger.py.j2' %}
+
+{% for m in methods %}
+{% if m.preset == 'linear' %}
+{% include '_method_linear.py.j2' %}
+{% elif m.preset == 'live_event' %}
+{% include '_method_live_event.py.j2' %}
+{% elif m.preset == 'oon' %}
+{% include '_method_oon.py.j2' %}
+{% endif %}
+{% endfor %}

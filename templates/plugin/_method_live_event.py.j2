@@ -1,0 +1,173 @@
+{# templates/plugin/_method_live_event.py.j2                                     #}
+{# Disney lifecycle preset: Types 16/17/19/20/54/55                              #}
+{#                                                                               #}
+{# Assumes scte_plugin.py.j2 Section 4 provides:                                 #}
+{#   - Async helpers: get_event_payload, start_event, terminal_event_end,        #}
+{#     terminal_event_end_cancel, terminal_event_update                          #}
+{#   - URL constants: LIVE_EVENT_STATE_URL, LIVE_EVENT_END_URL                   #}
+{#   - Config helpers: pts_off_x, dur_off_x, break_dur, break_dur_terminal,      #}
+{#     adis, live_event_end_ext, le_epoch_times, le_epoch_end_time, pt_mode,     #}
+{#     id3_to_file_enable, id3_to_file, call_sign_id, get_api_port, slicer_ver,  #}
+{#     stream_type_id                                                            #}
+{#   - Globals: BREAK_UPID_MISMATCH, EXTERNAL_ID, LIVE_EVENT_DATA, LIVE_EVENT_ID,#}
+{#     LIVE_EVENT_PAYLOAD, SLICER_ID_MISMATCH, TERMINAL_UPID, ZERO_DUR           #}
+{#                                                                               #}
+{# NOTE: Callbacks are inline per Disney pattern (closures over external_id,     #}
+{# pts, pts_offset, id3_mode, call_sign). Module-level _type16_callback /        #}
+{# _terminal_update_cb / _start_event_cb / _TYPE16_PTS_CACHE in scte_plugin.py.j2#}
+{# are vestigial and can be removed.                                             #}
+
+def {{ m.name }}(slice_info, slicer_id):
+    channel_group = '{{ m.channel_group }}'
+    call_sign = call_sign_id()
+    api_port = get_api_port()
+    slicer_version = slicer_ver()
+    stream_type = stream_type_id()
+    log(f'[upl-py_Param] From config file parameters - Call Sign set as: {call_sign} | Slicer Type set at the '
+        f'start of the {channel_group} method as: {stream_type}', call_sign=call_sign,
+        slicer_version=slicer_version, stream_type=stream_type)
+
+    try:
+        log(f'[upl-py_Method] In {channel_group} Method')
+        global BREAK_UPID_MISMATCH, EXTERNAL_ID, HOST, ID3_ENABLE, ID3_FOLDER_PATH, LIVE_EVENT_DATA, \
+            LIVE_EVENT_ID, LIVE_EVENT_PAYLOAD, LOCAL_MODE, OUTOFNETWORK_MODE, SLICER_CONFIG_DICT, \
+            SLICER_ID_MISMATCH, TECH_ISSUES_EXTID, TERMINAL_UPID, ZERO_DUR
+
+        id3_mode = id3_to_file_enable()
+        log(f'[upl-py_Param] From config file parameter, ID3 mode set at start of {channel_group} '
+            f'method as: <{id3_mode}>', call_sign=call_sign, slicer_version=slicer_version,
+            stream_type=stream_type)
+
+        passthrough_mode = pt_mode()
+        log(f'[upl-py_Param] From config file parameter, Passthrough mode set at start of {channel_group} '
+            f'method as: <{passthrough_mode}>', call_sign=call_sign, slicer_version=slicer_version,
+            stream_type=stream_type)
+
+        command_type = slice_info['splice_command_type']
+        pts = slice_info['pts_time']  # already base48k uPTS
+
+        # ══════════════════════════════════════════════════════════════════════
+        # Command Type 6 — Time Signal (Program lifecycle + mid-event slates)
+        # ══════════════════════════════════════════════════════════════════════
+        if command_type == 6:
+            seg_type_list = []
+            seg_id_indices = []
+            if 'descriptors' in slice_info:
+                for i, descriptor in enumerate(slice_info['descriptors']):
+                    if 'segmentation_type_id' in descriptor:
+                        seg_type_list.append(descriptor['segmentation_type_id'])
+                        seg_id_indices.append(i)
+
+                # ──────────────────────────────────────────────────────────────
+                # Type 0 (0x00) — Splice Null (log only)
+                # ──────────────────────────────────────────────────────────────
+                if 0 in seg_type_list:
+                    log('From 0 (Splice-null), log only, take no action', command_type=command_type,
+                        segmentation_type_id=0, call_sign=call_sign, slicer_version=slicer_version,
+                        stream_type=stream_type)
+
+                # ──────────────────────────────────────────────────────────────
+                # Type 16 (0x10) — Program Start (Live Event Start)
+                # ──────────────────────────────────────────────────────────────
+                if 16 in seg_type_list:
+                    idx = seg_type_list.index(16)
+                    seg_id_idx = seg_id_indices[idx]
+                    pts_offset = pts_off_x(16)
+                    log(f'[upl-py_Off] From 16, pts_offset: {pts_offset}',
+                        command_type=command_type, segmentation_type_id=16,
+                        call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
+
+                    # Reset state
+                    EXTERNAL_ID.clear()
+                    LIVE_EVENT_DATA.clear()
+                    LIVE_EVENT_ID.clear()
+                    LIVE_EVENT_PAYLOAD.clear()
+                    SLICER_ID_MISMATCH = False
+                    TERMINAL_UPID = False
+                    ZERO_DUR = False
+
+                    # Decode external_id (narrow exceptions)
+                    try:
+                        upid_bytes = slice_info['descriptors'][seg_id_idx]['segmentation_upid']
+                        if not upid_bytes:
+                            log('[upl-py_Err] Empty segmentation_upid — skipping', segmentation_type_id=16)
+                            return
+                        external_id = upid_bytes.decode('utf-8')
+                        EXTERNAL_ID.append(external_id)
+                    except (IndexError, KeyError, AttributeError, UnicodeDecodeError) as decode_err:
+                        log(f'[upl-py_Err] Could not fetch or decode External ID: {decode_err}',
+                            command_type=command_type, segmentation_type_id=16)
+                        return
+
+                    # Inline callback: closes over external_id, pts, pts_offset, id3_mode
+                    def _type16_callback(event_payload, _raw_msg):
+                        global SLICER_ID_MISMATCH
+
+                        # 1) Conflict check
+                        for ev in event_payload.get('events', []):
+                            for conflict in ev.get('conflicts', []):
+                                sid = conflict.get('slicer_id')
+                                if sid and sid != slicer_id:
+                                    SLICER_ID_MISMATCH = True
+                                    log(f'[upl-py_Err] Slicer ID mismatch: expected {slicer_id}, got {sid}',
+                                        segmentation_type_id=16, call_sign=call_sign)
+
+                        # 2) Bail on mismatch
+                        if SLICER_ID_MISMATCH:
+                            log(f'[upl-py_Err] Type-16 mismatch — skipping start for {external_id}',
+                                segmentation_type_id=16, call_sign=call_sign)
+                            return
+
+                        # 3) Compute epoch and start
+                        start_time_epoch = int(time.time() * 1000) + 1000
+
+                        def terminal_update(ext_id, _):
+                            try:
+                                log(f'[upl-py_LE] From 16, terminal update for <{ext_id}>',
+                                    command_type=command_type, segmentation_type_id=16,
+                                    call_sign=call_sign, slicer_version=slicer_version,
+                                    stream_type=stream_type)
+                            except (TypeError, KeyError) as err:
+                                log(f'[upl-py_Err] terminal_update log failed: {err}',
+                                    command_type=command_type, segmentation_type_id=16)
+
+                        def start_event_cb(event_id, _):
+                            try:
+                                state = slicer.GetState()
+                            except RuntimeError as state_err:
+                                log(f'[upl-py_Err] Could not get slicer state: {state_err}',
+                                    command_type=command_type, segmentation_type_id=16,
+                                    call_sign=call_sign, slicer_id=slicer_id,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                return None
+
+                            if state != 'slicing':
+                                log(f'[upl-py_LE] From 16, forcing ContentStart for <{event_id}>',
+                                    command_type=command_type, segmentation_type_id=16,
+                                    call_sign=call_sign, slicer_id=slicer_id,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                try:
+                                    slicer.ContentStart(int(pts + pts_offset))
+                                    slicer.FlushBreakMeta(int(pts + pts_offset))
+                                except (OSError, IOError) as io_err:
+                                    log(f'[upl-py_Err] ContentStart/FlushBreakMeta failed: {io_err}',
+                                        command_type=command_type, segmentation_type_id=16)
+                                return None
+
+                            log(f'[upl-py_LE] From 16, already slicing for <{event_id}>',
+                                command_type=command_type, segmentation_type_id=16)
+                            return event_id
+
+                        # Fire the updates
+                        terminal_event_update(external_id, start_time_epoch, terminal_update)
+                        start_event(external_id, slicer_id, start_event_cb, pts, pts_offset)
+
+                        # 4) Write ID3 if enabled
+                        if id3_mode:
+                            id3_to_file(api_port, call_sign, external_id, 'PROGRAM')
+                            log(f'[upl-py_ID3] Wrote ID3 payload for <{external_id}>',
+                                segmentation_type_id=16, call_sign=call_sign)
+
+                    # Register callback and return immediately
+                    get_event_payload(external_id, slicer_id, _type16_callback)
+                    return

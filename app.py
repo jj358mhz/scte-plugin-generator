@@ -172,7 +172,7 @@ def build_context(form) -> dict[str, Any]:
 @app.route('/', methods=['GET'])
 def index():
     """Serve the plugin-generation form."""
-    return render_template('form.html')
+    return render_template('form.html', generator_version=GENERATOR_VERSION)
 
 
 @app.route('/generate', methods=['POST'])

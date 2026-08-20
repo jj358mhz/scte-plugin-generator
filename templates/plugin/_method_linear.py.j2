@@ -1,26 +1,26 @@
 {#-
   _method_linear.py.j2 — Linear channel-group method.
 
-  Rendered when m.preset == 'linear'. In scope from parent:
-    m.name         (str, PascalCase)  — function name
-    m.channel_group (str, snake_case) — dispatch key
-    features       (set[str])
-    client_name    (str)
-    has_*          (bool)
+  Rendered when m.preset == 'linear'. Context in scope from parent:
+    m.name           (str, PascalCase)  — function name
+    m.channel_group  (str, snake_case)  — dispatch key
+    m.seg_id_pairs   (list[tuple])      — [(start_id, end_id, name), ...]
+    features         (set[str])
+    client_name      (str)
 -#}
 # =============================================================================
 # {{ m.name }} — `linear` preset channel-group method
 # =============================================================================
 # Dispatch shape:
 #   command_type=6 → Type 16 (Program Start) — always considered, gated by
-#                    `program_start_via_scte_mode`. Other Type 6 seg IDs
-#                    (34/35, 48/49, 54/55) only when scte_ad_break_mode='time_signal'.
+#                    program_start_via_scte_mode. Other Type 6 seg IDs only
+#                    when scte_ad_break_mode='time_signal'.
 #   command_type=5 → OON=1 → AdStart / OON=0 → AdEnd — only when
 #                    scte_ad_break_mode='splice_insert'.
 #
-# `scte_ad_break_mode` is a hard mutual-exclusion toggle: exactly one of
-# splice_insert / time_signal drives ad breaks per invocation. Type 16
-# dispatch is independent of the ad-break mode.
+# Blackout behavior controlled by allow_scte_wakeup (uplynk.conf):
+#   False (default): return immediately on blackout — sticky, SCTE cannot wake slicer.
+#   True: suppress ad breaks only; Type 16 still fires ContentStart.
 
 def {{ m.name }}(slice_info, slicer_id):
     """
@@ -45,15 +45,25 @@ def {{ m.name }}(slice_info, slicer_id):
     log(f'[upl-py_Param] From config: channel_group={channel_group} for slicer={slicer_id}',
         call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
 
+    def _log_param(name, value):
+        log(f'[upl-py_Param] From config file parameter, {name} set at start of '
+            f'{channel_group} method as {value}',
+            call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
+
     # -----------------------------------------------------------------
-    # Blackout gate — ad breaks suppress in blackout. Type 16 still
-    # runs (program-start signal in blackout is often the cue to leave).
+    # Blackout gate — controlled by allow_scte_wakeup in uplynk.conf.
     # -----------------------------------------------------------------
     slicer_state = slicer.GetState()
     in_blackout = slicer_state in ('blackout', 'start_blackout')
+    wakeup_ok = scte_wakeup_enabled()
+
     if in_blackout:
-        log(f'[upl-py_Bo] Slicer in {slicer_state}, ad breaks will be suppressed',
+        log(f'[upl-py_Bo] Slicer in {slicer_state}, allow_scte_wakeup={wakeup_ok}',
             call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
+        if not wakeup_ok:
+            return  # sticky blackout — SCTE cannot wake the slicer
+        # wakeup_ok=True falls through — ad breaks suppressed below,
+        # but Type 16 still processed
     else:
         log(f'[upl-py_Bo] Slicer state={slicer_state}, processing SCTE',
             call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
@@ -65,28 +75,34 @@ def {{ m.name }}(slice_info, slicer_id):
         # Runtime config toggles.
         # -----------------------------------------------------------------
         passthrough_mode = pt_mode()
-        program_start_mode_on = pgm_start_mode()
-        ad_mode = ad_break_mode()  # 'splice_insert' | 'time_signal'
-        outofnetwork_mode = oon_mode()
-        skip_splice = ad_skip_spliceinsert()
-        skip_timesignal = ad_skip_timesignal()
+        _log_param('Passthrough mode', passthrough_mode)
 
-        log(f'[upl-py_Mode] passthrough={passthrough_mode} '
-            f'program_start_via_scte={program_start_mode_on} '
-            f'ad_break_mode={ad_mode} oon_mode={outofnetwork_mode} '
-            f'skip_spliceinsert={skip_splice} skip_timesignal={skip_timesignal}',
-            call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
+        program_start_mode_on = pgm_start_mode()
+        _log_param('Program start via SCTE mode', program_start_mode_on)
+
+        ad_mode = ad_break_mode()  # 'splice_insert' | 'time_signal'
+        _log_param('SCTE ad break mode', ad_mode)
+
+        outofnetwork_mode = oon_mode()
+        _log_param('Out of Network mode', outofnetwork_mode)
+
+        skip_splice = ad_skip_spliceinsert()
+        _log_param('Skip splice_insert ad breaks', skip_splice)
+
+        skip_timesignal = ad_skip_timesignal()
+        _log_param('Skip time_signal ad breaks', skip_timesignal)
 
 {% if 'boundary_handling' in features %}
         use_boundary = boundary_mode()
+        _log_param('Boundary mode', use_boundary)
         boundary_name_oon      = BOUNDARY_MODE.get('boundary_name_oon', '-')
         boundary_name_local    = BOUNDARY_MODE.get('boundary_name_local', '-')
         boundary_name_national = BOUNDARY_MODE.get('boundary_name_national', '-')
         boundary_dur_max = boundary_duration_max()
         if use_boundary:
-            log(f'[upl-py_Bo] boundary_names: oon={boundary_name_oon} '
-                f'local={boundary_name_local} national={boundary_name_national} '
-                f'max_duration_pts={boundary_dur_max}',
+            log(f'[upl-py_Param] Boundary names: oon={boundary_name_oon}, '
+                f'local={boundary_name_local}, national={boundary_name_national}, '
+                f'max_duration={boundary_dur_max} pts',
                 call_sign=call_sign, stream_type=stream_type)
 {% endif %}
 
@@ -105,18 +121,22 @@ def {{ m.name }}(slice_info, slicer_id):
         # =================================================================
         if command_type == 6:
             if skip_timesignal:
-                log(f'[upl-py_Mode] ad_skip_timesignal=True, skipping all Type 6 processing',
+                log(f'[upl-py_Mode] ad_skip_timesignal set to {skip_timesignal}, '
+                    f'skip processing time_signal ad breaks',
                     command_type=command_type, call_sign=call_sign,
                     slicer_version=slicer_version, stream_type=stream_type)
                 return
 
             descriptors = slice_info.get('descriptors', [])
             if not descriptors:
-                log('[upl-py_Warn] No descriptors in command_type=6',
+                log('[upl-py_Err] Warning: There are no descriptors in command type 6',
                     command_type=command_type, call_sign=call_sign)
                 return
 
-            seg_type_list = [d.get('segmentation_type_id') for d in descriptors]
+            seg_type_list = []
+            for descriptor in descriptors:
+                if 'segmentation_type_id' in descriptor:
+                    seg_type_list.append(descriptor['segmentation_type_id'])
 
             # ---------------------------------------------------------
             # Splice Null — log only, take no action.
@@ -128,16 +148,16 @@ def {{ m.name }}(slice_info, slicer_id):
                     stream_type=stream_type)
 
             # ---------------------------------------------------------
-            # Type 16 — Program Start. Gated by pgm_start_via_scte_mode.
+            # Type 16 — Program Start. Gated by program_start_via_scte_mode.
             # Independent of ad_break_mode.
             # ---------------------------------------------------------
-            if 16 in seg_type_list:
-                if not program_start_mode_on:
-                    log(f'[upl-py_Cs] program_start_via_scte_mode=False, '
-                        f'Type 16 observed but skipping ContentStart',
-                        command_type=command_type, segmentation_type_id=16,
-                        call_sign=call_sign, stream_type=stream_type)
-                else:
+            if not program_start_mode_on:
+                log(f'[upl-py_Cs_Skip] Program start via SCTE mode set to: '
+                    f'<{program_start_mode_on}>, skip processing program starts via SCTE',
+                    command_type=command_type, call_sign=call_sign,
+                    stream_type=stream_type)
+            else:
+                if 16 in seg_type_list:
                     index = seg_type_list.index(16)
                     upid_bytes = descriptors[index].get('segmentation_upid', b'')
                     try:
@@ -169,28 +189,28 @@ def {{ m.name }}(slice_info, slicer_id):
 {% endif %}
 
                     pts_offset = pts_off_x(16)
-                    log(f'[upl-py_Off] From 16, pts_offset={pts_offset} pts',
+                    log(f'[upl-py_Off] From 16, pts_offset set as: {pts_offset} pts',
                         command_type=command_type, segmentation_type_id=16,
                         call_sign=call_sign, slicer_version=slicer_version,
                         stream_type=stream_type)
                     base64_16 = slice_info.get('base64')
 
-                    if not desc:
-                        log(f'[upl-py_Cs] From 16, missing UPID at {pts + pts_offset} pts, '
-                            f'skipping ContentStart',
+                    if desc == '':
+                        log(f'[upl-py_Cs_Skip] From 16, Missing UPID at '
+                            f'{pts + pts_offset} pts, skipping Content Start',
                             command_type=command_type, segmentation_type_id=16,
                             call_sign=call_sign, slicer_version=slicer_version,
                             stream_type=stream_type)
                     else:
-                        log(f'[upl-py_Cs] From 16, ContentStart at {pts + pts_offset} pts '
-                            f'external_id={desc}',
+                        log(f'[upl-py_Cs] From 16, Content Start at '
+                            f'{pts + pts_offset} pts with external_id set: {desc}',
                             command_type=command_type, segmentation_type_id=16,
                             call_sign=call_sign, slicer_version=slicer_version,
                             stream_type=stream_type)
                         slicer.ContentStart(int(pts + pts_offset),
-                                            f'{slicer_id} - {desc}', desc)
+                                            slicer_id + ' - ' + desc, desc)
                         slicer.MetaMetadata('call_sign', str(call_sign))
-                        slicer.MetaMetadata('config_file_gain_parameters', str(gain))
+                        slicer.MetaMetadata('config_file_gain_parameters', gain)
                         slicer.MetaMetadata('original_upid', upid)
                         slicer.MetaMetadata('outofnetwork_mode', str(outofnetwork_mode))
                         slicer.MetaMetadata('passthrough_mode', str(passthrough_mode))
@@ -198,19 +218,23 @@ def {{ m.name }}(slice_info, slicer_id):
                         slicer.MetaMetadata('plugin_version', PLUGIN_VERSION)
                         slicer.MetaMetadata('profile', profile_guid)
                         slicer.MetaMetadata('program_start_base64_message',
-                                            str(base64_16, 'UTF-8') if base64_16 else '')
+                                            str(base64_16, 'utf-8') if base64_16 else '')
                         slicer.MetaMetadata('pts_offset_16', str(pts_offset))
-                        slicer.MetaMetadata('signal_type', str(signal))
+                        slicer.MetaMetadata('signal_type', signal)
                         slicer.MetaMetadata('stream_type', str(stream_type))
                         slicer.FlushBreakMeta(int(pts + pts_offset))
 
             # ---------------------------------------------------------
-            # Ad-break seg IDs (34/35, 48/49, 54/55) — only when
-            # ad_break_mode='time_signal'. Otherwise observability-only.
+            # Ad-break seg IDs — only when ad_break_mode='time_signal'.
             # ---------------------------------------------------------
-            if ad_mode != 'time_signal':
+            if passthrough_mode:
+                log(f'[upl-py_Mode] Passthrough mode set to {passthrough_mode}, '
+                    f'skip processing ad breaks',
+                    command_type=command_type, call_sign=call_sign,
+                    stream_type=stream_type)
+            elif ad_mode != 'time_signal':
                 ad_break_ids_seen = [s for s in seg_type_list
-                                     if s in (34, 35, 48, 49, 54, 55)]
+                                     if s in (32, 33, 34, 35, 48, 49, 54, 55)]
                 if ad_break_ids_seen:
                     log(f'[upl-py_Mode] ad_break_mode={ad_mode}, observed but '
                         f'ignoring Type 6 ad-break seg_ids: {ad_break_ids_seen}',
@@ -218,10 +242,6 @@ def {{ m.name }}(slice_info, slicer_id):
                         stream_type=stream_type)
             elif in_blackout:
                 log('[upl-py_Bo] In blackout, suppressing Type 6 ad breaks',
-                    command_type=command_type, call_sign=call_sign,
-                    stream_type=stream_type)
-            elif passthrough_mode:
-                log(f'[upl-py_Mode] passthrough_mode=True, skipping Type 6 ad breaks',
                     command_type=command_type, call_sign=call_sign,
                     stream_type=stream_type)
             else:
@@ -240,115 +260,131 @@ def {{ m.name }}(slice_info, slicer_id):
         # command_type=5 — splice_insert with OON indicator
         # =================================================================
         elif command_type == 5:
-            if skip_splice:
-                log(f'[upl-py_Mode] ad_skip_spliceinsert=True, skipping all Type 5 processing',
+            if passthrough_mode:
+                log(f'[upl-py_Mode] Passthrough mode set to {passthrough_mode}, '
+                    f'skip processing all ad breaks',
                     command_type=command_type, call_sign=call_sign,
                     slicer_version=slicer_version, stream_type=stream_type)
-                return
-
-            if ad_mode != 'splice_insert':
+            elif skip_splice:
+                log(f'[upl-py_Mode] ad_skip_spliceinsert set to {skip_splice}, '
+                    f'skip processing splice_insert ad breaks',
+                    command_type=command_type, call_sign=call_sign,
+                    slicer_version=slicer_version, stream_type=stream_type)
+            elif ad_mode != 'splice_insert':
                 log(f'[upl-py_Mode] ad_break_mode={ad_mode}, observing but '
                     f'ignoring Type 5 splice_insert',
                     command_type=command_type, call_sign=call_sign,
                     stream_type=stream_type)
-                return
-
-            if in_blackout:
+            elif in_blackout:
                 log('[upl-py_Bo] In blackout, suppressing Type 5 ad break',
                     command_type=command_type, call_sign=call_sign,
                     stream_type=stream_type)
-                return
-
-            if passthrough_mode:
-                log(f'[upl-py_Mode] passthrough_mode=True, skipping Type 5 ad break',
-                    command_type=command_type, call_sign=call_sign,
-                    slicer_version=slicer_version, stream_type=stream_type)
-                return
-
-            command = slice_info.get('command', {})
-            oon = command.get('out_of_network_indicator', 0)
-            base64_msg = slice_info.get('base64')
-            base64_str = str(base64_msg, 'UTF-8') if base64_msg else ''
-
-            log(f'[upl-py_Meta] OON state: {oon}',
-                command_type=command_type, oon=oon, call_sign=call_sign)
-
-            if oon == 1:
-                pts_offset = pts_off_x(501)
-                if command.get('duration_flag') == 0:
-                    # No duration — open-ended ad break (Affiliate Pod Start).
-                    log(f'[upl-py_Ad] OON=1 no duration, AdStart at {pts + pts_offset} pts',
-                        command_type=command_type, oon=1, call_sign=call_sign,
-                        slicer_version=slicer_version, stream_type=stream_type)
-{% if 'boundary_handling' in features %}
-                    if use_boundary:
-                        slicer.StartBoundary(int(pts + pts_offset),
-                                             boundary_name_for(501))
-                    else:
-                        slicer.AdMeta('base64_oon1', base64_str)
-                        slicer.AdStart(int(pts + pts_offset))
-{% else %}
-                    slicer.AdMeta('base64_oon1', base64_str)
-                    slicer.AdStart(int(pts + pts_offset))
-{% endif %}
-                else:
-                    duration = break_dur_oon(slice_info)
-                    duration_offset = dur_off_x(501)
-                    approx_duration_in_seconds = adis(duration, duration_offset)
-                    log(f'[upl-py_Off] OON=1 duration_offset={duration_offset} pts '
-                        f'pts_offset={pts_offset} pts',
-                        command_type=command_type, oon=1, call_sign=call_sign,
-                        slicer_version=slicer_version, stream_type=stream_type)
-                    log(f'[upl-py_Ad] OON=1 AdStart at {pts + pts_offset} pts '
-                        f'for {approx_duration_in_seconds}s',
-                        command_type=command_type, oon=1, call_sign=call_sign,
-                        slicer_version=slicer_version, stream_type=stream_type)
-{% if 'boundary_handling' in features %}
-                    if use_boundary:
-                        final_duration = duration + duration_offset
-                        if 0 < boundary_dur_max < final_duration:
-                            log(f'[upl-py_Bo] OON=1 duration {final_duration} exceeds '
-                                f'max {boundary_dur_max}, capping',
-                                call_sign=call_sign, stream_type=stream_type)
-                            final_duration = boundary_dur_max
-                        slicer.StartBoundary(int(pts + pts_offset),
-                                             boundary_name_for(501),
-                                             int(final_duration))
-                    else:
-                        slicer.AdMeta('base64_oon1', base64_str)
-                        slicer.AdStart(int(pts + pts_offset),
-                                       int(duration + duration_offset))
-{% else %}
-                    slicer.AdMeta('base64_oon1', base64_str)
-                    slicer.AdStart(int(pts + pts_offset),
-                                   int(duration + duration_offset))
-{% endif %}
-
-            elif oon == 0:
-                pts_offset = pts_off_x(500)
-                log(f'[upl-py_Off] OON=0 pts_offset={pts_offset} pts',
-                    command_type=command_type, oon=0, call_sign=call_sign,
-                    slicer_version=slicer_version, stream_type=stream_type)
-                slicer.FlushBreakMeta(int(pts + pts_offset))
-                log(f'[upl-py_Ad] OON=0 AdEnd at {pts + pts_offset} pts',
-                    command_type=command_type, oon=0, call_sign=call_sign,
-                    slicer_version=slicer_version, stream_type=stream_type)
-{% if 'boundary_handling' in features %}
-                if use_boundary:
-                    slicer.EndBoundary(int(pts + pts_offset))
-                else:
-                    slicer.AdEnd(int(pts + pts_offset))
-{% else %}
-                slicer.AdEnd(int(pts + pts_offset))
-{% endif %}
-
             else:
-                log(f'[upl-py_Warn] Unexpected OON value: {oon}',
-                    command_type=command_type, oon=oon, call_sign=call_sign,
-                    slicer_version=slicer_version, stream_type=stream_type)
+                command = slice_info.get('command', {})
+                oon = command.get('out_of_network_indicator', 0)
+                log(f'[upl-py_Meta] OON state: {oon}',
+                    command_type=command_type, oon=oon)
+
+                if 'duration' in command:
+                    if command['duration'] != 0:
+                        duration = break_dur_oon(slice_info)
+                        if oon == 1:
+                            duration_offset = dur_off_x(501)
+                            pts_offset = pts_off_x(501)
+                            approx_duration_in_seconds = adis(duration, duration_offset)
+                            log(f'[upl-py_Off] From OON=1, duration_offset set as: '
+                                f'{duration_offset} pts | pts_offset set as: {pts_offset} pts',
+                                command_type=command_type, oon=1,
+                                call_sign=call_sign, slicer_version=slicer_version,
+                                stream_type=stream_type)
+{% if 'boundary_handling' in features %}
+                            if use_boundary:
+                                boundary_name = boundary_name_oon
+                                if 0 < boundary_dur_max < (duration + duration_offset):
+                                    final_duration = boundary_dur_max
+                                    approx_final_duration = adis(final_duration, 0)
+                                    log(f'[upl-py_Boundary] OON=1, duration '
+                                        f'{approx_duration_in_seconds}s exceeds max '
+                                        f'{approx_final_duration}s, capping',
+                                        command_type=command_type, oon=1,
+                                        call_sign=call_sign, slicer_version=slicer_version,
+                                        stream_type=stream_type)
+                                else:
+                                    final_duration = duration + duration_offset
+                                    approx_final_duration = approx_duration_in_seconds
+                                end_pts = pts + pts_offset + final_duration
+                                log(f'[upl-py_Boundary] StartBoundary at '
+                                    f'{pts + pts_offset} pts for {approx_final_duration}s',
+                                    command_type=command_type, oon=1,
+                                    call_sign=call_sign, slicer_version=slicer_version,
+                                    stream_type=stream_type)
+                                slicer.StartBoundary(int(pts + pts_offset),
+                                                     boundary_name,
+                                                     int(final_duration))
+                                log(f'[upl-py_Boundary] EndBoundary at {end_pts} pts '
+                                    f'({approx_final_duration}s)',
+                                    command_type=command_type, oon=1,
+                                    call_sign=call_sign, slicer_version=slicer_version,
+                                    stream_type=stream_type)
+                                slicer.EndBoundary(int(end_pts))
+                            else:
+                                log(f'[upl-py_Ad] From OON=1, Affiliate Pod Start at '
+                                    f'{pts + pts_offset} for {approx_duration_in_seconds} seconds',
+                                    command_type=command_type, oon=1,
+                                    call_sign=call_sign, slicer_version=slicer_version,
+                                    stream_type=stream_type)
+                                base64_oon1 = slice_info.get('base64')
+                                slicer.AdMeta('base64_oon1',
+                                              str(base64_oon1, 'utf-8') if base64_oon1 else '')
+                                slicer.AdStart(int(pts + pts_offset),
+                                               int(duration + duration_offset))
+{% else %}
+                            log(f'[upl-py_Ad] From OON=1, Affiliate Pod Start at '
+                                f'{pts + pts_offset} for {approx_duration_in_seconds} seconds',
+                                command_type=command_type, oon=1,
+                                call_sign=call_sign, slicer_version=slicer_version,
+                                stream_type=stream_type)
+                            base64_oon1 = slice_info.get('base64')
+                            slicer.AdMeta('base64_oon1',
+                                          str(base64_oon1, 'utf-8') if base64_oon1 else '')
+                            slicer.AdStart(int(pts + pts_offset),
+                                           int(duration + duration_offset))
+{% endif %}
+                        else:
+                            log(f'[upl-py_Ad] OON={oon} (in-network), no boundary/ad '
+                                f'action taken, skipping break',
+                                command_type=command_type, oon=oon,
+                                call_sign=call_sign, slicer_version=slicer_version,
+                                stream_type=stream_type)
+                    else:
+                        log('[upl-py_Ad] Zero-duration break received (duration=0), '
+                            'skipping break',
+                            command_type=command_type, oon=oon,
+                            call_sign=call_sign, slicer_version=slicer_version,
+                            stream_type=stream_type)
+                else:
+                    # OON=0 — return to network, AdEnd
+                    pts_offset = pts_off_x(500)
+                    log(f'[upl-py_Off] OON=0 pts_offset={pts_offset} pts',
+                        command_type=command_type, oon=0,
+                        call_sign=call_sign, slicer_version=slicer_version,
+                        stream_type=stream_type)
+                    slicer.FlushBreakMeta(int(pts + pts_offset))
+                    log(f'[upl-py_Ad] OON=0 AdEnd at {pts + pts_offset} pts',
+                        command_type=command_type, oon=0,
+                        call_sign=call_sign, slicer_version=slicer_version,
+                        stream_type=stream_type)
+{% if 'boundary_handling' in features %}
+                    if use_boundary:
+                        slicer.EndBoundary(int(pts + pts_offset))
+                    else:
+                        slicer.AdEnd(int(pts + pts_offset))
+{% else %}
+                    slicer.AdEnd(int(pts + pts_offset))
+{% endif %}
 
         else:
-            log(f'[upl-py_Warn] Unhandled SCTE command_type={command_type}',
+            log('[upl-py_Err] Unhandled SCTE command type',
                 command_type=command_type, call_sign=call_sign)
 
     except Exception as e:
@@ -359,26 +395,13 @@ def {{ m.name }}(slice_info, slicer_id):
 def _handle_time_signal_ad_breaks(slice_info, slicer_id, seg_type_list,
                                   descriptors, pts, **kwargs):
     """
-    Handle Type 6 ad-break seg IDs (34/35, 48/49, 54/55) when
-    scte_ad_break_mode='time_signal'.
+    Handle Type 6 ad-break seg IDs when scte_ad_break_mode='time_signal'.
 
-    START seg IDs (34, 48, 54) fire AdStart/StartBoundary with the descriptor's
-    duration. END seg IDs (35, 49, 55) fire AdEnd/EndBoundary.
+    START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.
+    Zero-duration START events: fire-and-reset ZERO_DUR flag, skip AdStart.
+    No END-side ZERO_DUR check — cannot assume matching END will arrive.
 
-    Zero-duration START events set and immediately reset ZERO_DUR=True/False
-    as a fire-and-reset transient flag. No END-side ZERO_DUR check — we
-    cannot assume 35/49/55 will arrive.
-
-    Args:
-        slice_info: The SCTE bridge object.
-        slicer_id: This slicer's ID.
-        seg_type_list: List of seg_type_ids from the descriptors.
-        descriptors: The slice_info['descriptors'] list.
-        pts: Base48k uPTS from slice_info.
-        **kwargs: call_sign, slicer_version, stream_type — for log context.
-{% if 'boundary_handling' in features %}
-                  use_boundary, boundary_dur_max — when boundary feature enabled.
-{% endif %}
+    Active pairs driven by m.seg_id_pairs from the generator form.
     """
     global ZERO_DUR
     call_sign = kwargs.get('call_sign', '-')
@@ -390,9 +413,9 @@ def _handle_time_signal_ad_breaks(slice_info, slicer_id, seg_type_list,
 {% endif %}
 
     for start_id, end_id, seg_name in (
-        (34, 35,  'Break'),
-        (48, 49,  'Provider Advertisement'),
-        (54, 55,  'Distributor Placement Opportunity'),
+{% for pair in m.seg_id_pairs %}
+        ({{ pair[0] }}, {{ pair[1] }}, '{{ pair[2] }}'),
+{% endfor %}
     ):
         # ----- START handler -----
         if start_id in seg_type_list:
@@ -402,18 +425,23 @@ def _handle_time_signal_ad_breaks(slice_info, slicer_id, seg_type_list,
             duration = break_dur(slice_info, index)
             duration_offset = dur_off_x(start_id)
             pts_offset = pts_off_x(start_id)
-            approx_duration = adis(duration, duration_offset)
 
             if duration == 0:
-                # Zero-duration: fire-and-reset. Do not expect a matching END.
                 ZERO_DUR = True
-                log(f'[upl-py_Ad] From {start_id} (0x{start_id:02x}, {seg_name} Start), '
-                    f'zero duration — skipping AdStart',
+                log(f'[upl-py_Err] From {start_id} (0x{start_id:02x}, {seg_name} Start), '
+                    f'setting ZERO_DUR to True - invalid duration is: 0 pts, skipping ad break',
                     segmentation_type_id=start_id, call_sign=call_sign,
                     slicer_version=slicer_version, stream_type=stream_type)
                 ZERO_DUR = False
                 continue
 
+            duration_offset = dur_off_x(start_id)
+            pts_offset = pts_off_x(start_id)
+            approx_duration = adis(duration, duration_offset)
+            log(f'[upl-py_Off] From {start_id}, duration_offset set as: {duration_offset} pts | '
+                f'pts_offset set as: {pts_offset} pts',
+                segmentation_type_id=start_id, call_sign=call_sign,
+                slicer_version=slicer_version, stream_type=stream_type)
             log(f'[upl-py_Ad] From {start_id} (0x{start_id:02x}, {seg_name} Start) '
                 f'at {pts + pts_offset} pts for {approx_duration}s upid={upid}',
                 segmentation_type_id=start_id, call_sign=call_sign,
@@ -424,32 +452,52 @@ def _handle_time_signal_ad_breaks(slice_info, slicer_id, seg_type_list,
                 boundary_name = boundary_name_for(start_id)
                 final_duration = duration + duration_offset
                 if 0 < boundary_dur_max < final_duration:
-                    log(f'[upl-py_Bo] duration {final_duration} exceeds '
-                        f'max {boundary_dur_max}, capping',
+                    approx_final_duration = adis(final_duration, 0)
+                    log(f'[upl-py_Boundary] duration {approx_duration}s exceeds '
+                        f'max {approx_final_duration}s, capping',
                         segmentation_type_id=start_id, call_sign=call_sign,
                         stream_type=stream_type)
                     final_duration = boundary_dur_max
-                    slicer.StartBoundary(int(pts + pts_offset), boundary_name,
-                                         int(final_duration))
-                    slicer.EndBoundary(int(pts + pts_offset + final_duration))
-                else:
-                    slicer.StartBoundary(int(pts + pts_offset), boundary_name,
-                                         int(final_duration))
+                end_pts = pts + pts_offset + final_duration
+                approx_final_duration = adis(final_duration, 0)
+                log(f'[upl-py_Boundary] StartBoundary at {pts + pts_offset} pts '
+                    f'for {approx_final_duration}s',
+                    segmentation_type_id=start_id, call_sign=call_sign,
+                    stream_type=stream_type)
+                slicer.StartBoundary(int(pts + pts_offset), boundary_name,
+                                     int(final_duration))
+                log(f'[upl-py_Boundary] EndBoundary at {end_pts} pts '
+                    f'({approx_final_duration}s)',
+                    segmentation_type_id=start_id, call_sign=call_sign,
+                    stream_type=stream_type)
+                slicer.EndBoundary(int(end_pts))
             else:
-                slicer.AdStart(int(pts + pts_offset),
-                               int(duration + duration_offset))
+                slicer.AdStart(int(pts + pts_offset), int(duration + duration_offset))
 {% else %}
-            slicer.AdStart(int(pts + pts_offset),
-                           int(duration + duration_offset))
+            slicer.AdStart(int(pts + pts_offset), int(duration + duration_offset))
 {% endif %}
 
         # ----- END handler -----
         if end_id in seg_type_list:
+            if ZERO_DUR:
+                log(f'[upl-py_Err] From {start_id}, invalid duration, '
+                    f'skipping {end_id} SCTE logic',
+                    segmentation_type_id=end_id, call_sign=call_sign,
+                    slicer_version=slicer_version, stream_type=stream_type)
+                ZERO_DUR = False
+                log(f'[upl-py_Err] Setting ZERO_DUR variable to False. '
+                    f'Resuming processing {start_id}/{end_id}',
+                    segmentation_type_id=end_id, call_sign=call_sign,
+                    slicer_version=slicer_version, stream_type=stream_type)
+                continue
+
             index = seg_type_list.index(end_id)
             upid_bytes = descriptors[index].get('segmentation_upid', b'')
             upid = str(upid_bytes, 'UTF-8') if upid_bytes else ''
             pts_offset = pts_off_x(end_id)
-
+            log(f'[upl-py_Off] From {end_id}, pts_offset set as: {pts_offset} pts',
+                segmentation_type_id=end_id, call_sign=call_sign,
+                slicer_version=slicer_version, stream_type=stream_type)
             log(f'[upl-py_Ad] From {end_id} (0x{end_id:02x}, {seg_name} End) '
                 f'at {pts + pts_offset} pts upid={upid}',
                 segmentation_type_id=end_id, call_sign=call_sign,

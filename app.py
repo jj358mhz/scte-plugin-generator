@@ -132,8 +132,12 @@ def build_context(form) -> dict[str, Any]:
     iterating `methods` inline.
     """
     methods = parse_methods_from_form(form)
-    if not methods:
-        raise ValueError('At least one method must be selected')
+    # NOTE: temporarily allowed while method sub-templates are being fleshed out.
+    # SCTELogger is always emitted, so a zero-method plugin still produces a
+    # valid diagnostic-only scaffold. Re-add the "must select at least one"
+    # check once _method_linear/_live_event/_oon.py.j2 are all in place.
+    #if not methods:
+     #   raise ValueError('At least one method must be selected')
 
     features = parse_features_from_form(form)
 

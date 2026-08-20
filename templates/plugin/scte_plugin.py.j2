@@ -104,6 +104,7 @@ ZERO_DUR = False
 OUTOFNETWORK_MODE = {}
 PROGRAM_START_VIA_SCTE_MODE = {}
 LOCAL_MODE = {}
+SCTE_WAKEUP_ENABLED = {}   # allow_scte_wakeup: when True, Type 16 fires ContentStart even in blackout
 AD_SKIP_SPLICEINSERT = {}
 AD_SKIP_TIMESIGNAL = {}
 AD_BREAK_MODE = {}         # 'splice_insert' | 'time_signal' — mutually exclusive dispatch
@@ -199,47 +200,47 @@ def _normalize_verbosity(raw, default='2'):
 
 def break_dur(slice_info, index):
     """
-    Extract segmentation_duration from a Type 6 descriptor at `index`.
+    Standardizes the PTS message time to uPTS (base48k).
 
-    Returns 0 if the descriptor has no duration (e.g. END events). Value is
-    in base48k uPTS units.
+    Converts segmentation_duration from base90k (MPEG-2 TS) to base48k (Uplynk).
 
     Args:
-        slice_info (dict): The SCTE bridge object.
-        index (int): Position in the descriptors list.
+        slice_info (dict): SCTE message information
+        index (int): Index of the descriptor
 
     Returns:
-        int: Duration in base48k uPTS, or 0 if absent.
+        int: Duration in base48k uPTS
+
+    Example:
+        5400000 PTS(base90k) → 2880000 uPTS(base48k)
     """
-    try:
-        descriptors = slice_info.get('descriptors', [])
-        if index < 0 or index >= len(descriptors):
-            return 0
-        return int(descriptors[index].get('segmentation_duration', 0) or 0)
-    except Exception as e:
-        log(f'[upl-py_Err] break_dur({index}): {e}' + traceback.format_exc())
-        return 0
+    duration_90k = slice_info['descriptors'][index]['segmentation_duration']
+    # Convert from base90k to base48k using simplified ratio: 48000/90000 = 8/15
+    # Using integer arithmetic to avoid float precision issues
+    duration_48k = (duration_90k * 8) // 15
+    return duration_48k
 
 
 def break_dur_oon(slice_info):
     """
-    Extract duration from a Type 5 splice_insert command.
+    Standardizes the PTS message time to uPTS (base48k) for Type 5, OON=1.
 
-    Type 5 stores its duration on the `command` object rather than on a
-    descriptor. Returns 0 for open-ended breaks (no duration_flag).
+    Converts duration from base90k (MPEG-2 TS) to base48k (Uplynk).
 
     Args:
-        slice_info (dict): The SCTE bridge object.
+        slice_info (dict): SCTE message information
 
     Returns:
-        int: Duration in base48k uPTS, or 0 if absent.
+        int: Duration in base48k uPTS
+
+    Example:
+        5400000 PTS(base90k) → 2880000 uPTS(base48k)
     """
-    try:
-        command = slice_info.get('command', {})
-        return int(command.get('duration', 0) or 0)
-    except Exception as e:
-        log(f'[upl-py_Err] break_dur_oon: {e}' + traceback.format_exc())
-        return 0
+    duration_90k = slice_info['command']['duration']
+    # Convert from base90k to base48k using simplified ratio: 48000/90000 = 8/15
+    # Using integer arithmetic to avoid float precision issues
+    duration_48k = (duration_90k * 8) // 15
+    return duration_48k
 
 
 def adis(duration, duration_offset):
@@ -424,6 +425,37 @@ def profile_id(current_profile=None):
     except Exception as e:
         log(f'[upl-py_Err] profile_id: {e}' + traceback.format_exc())
         return '-'
+
+
+def scte_wakeup_enabled(flag=None):
+    """
+    Parse allow_scte_wakeup from uplynk.conf.
+
+    Controls whether a SCTE Type 16 (Program Start) can pull the slicer out
+    of blackout state by firing ContentStart.
+
+    When False (default): slicer in blackout → return immediately, no SCTE
+    processing of any type. Blackout is sticky.
+
+    When True: slicer in blackout → ad breaks suppressed, but Type 16 still
+    fires ContentStart. Use when automation sends a SCTE program-start as the
+    trigger to begin slicing.
+
+    Config key: allow_scte_wakeup
+    Returns:
+        bool
+    """
+    global SCTE_WAKEUP_ENABLED
+    if flag in SCTE_WAKEUP_ENABLED:
+        return SCTE_WAKEUP_ENABLED[flag]
+    try:
+        raw = SLICER_CONFIG_DICT.get('allow_scte_wakeup', False)
+        value = _parse_bool_config(raw, default=False)
+        SCTE_WAKEUP_ENABLED[flag] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] scte_wakeup_enabled: {e}' + traceback.format_exc())
+        return False
 
 
 def signal_type(signal=None):

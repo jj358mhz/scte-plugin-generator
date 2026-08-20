@@ -1,0 +1,32 @@
+# .github/workflows/deploy.yml
+# Triggered on every push to main.
+# SSHes into the Utility Pi, pulls the latest commit, rebuilds and restarts
+# the scte-plugin-generator Docker container.
+
+name: Deploy to Utility Pi
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    name: SSH deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          port: 22
+          script: |
+            set -e
+            cd ~/git/scte-plugin-generator
+            git pull origin main
+            docker compose up -d --build
+            echo "Deploy complete: $(git rev-parse --short HEAD)"

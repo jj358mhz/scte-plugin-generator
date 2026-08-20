@@ -1,0 +1,213 @@
+"""
+scte-plugin-generator — Flask app.
+
+Skeleton form. POST /generate renders the plugin templates against form
+input, packages the result into an in-memory zip, and returns it as a
+download. This first cut renders an empty zip so the pipeline can be
+proven end-to-end before we wire in the real templates.
+"""
+
+import io
+import os
+import re
+import zipfile
+from datetime import date
+from typing import Any
+
+from flask import Flask, render_template, request, send_file, abort
+from jinja2 import Environment, FileSystemLoader, StrictUndefined
+
+app = Flask(__name__)
+
+# -----------------------------------------------------------------------------
+# Jinja environment for PLUGIN template rendering.
+#
+# Separate from Flask's default env — Flask's is for HTML pages, this one is
+# for the generated Python/Markdown files. Different roots, different config:
+#
+#   trim_blocks=True         — strip the newline after a {% %} block
+#   lstrip_blocks=True       — strip leading whitespace on lines that start
+#                              with a {% %} block
+#   keep_trailing_newline=True — preserve the final newline of each template
+#   undefined=StrictUndefined  — raise on any undefined variable rather than
+#                              silently rendering an empty string
+# -----------------------------------------------------------------------------
+plugin_env = Environment(
+    loader=FileSystemLoader(os.path.join(os.path.dirname(__file__), 'templates', 'plugin')),
+    trim_blocks=True,
+    lstrip_blocks=True,
+    keep_trailing_newline=True,
+    undefined=StrictUndefined,
+)
+
+
+# =============================================================================
+# Helpers
+# =============================================================================
+
+_SNAKE_RE = re.compile(r'^[a-z][a-z0-9_]*$')
+
+
+def snake_to_pascal(s: str) -> str:
+    """
+    Convert snake_case to PascalCase.
+
+    'live_event' -> 'LiveEvent'
+    'cbs_sports_unified' -> 'CbsSportsUnified'  (no acronym awareness)
+
+    Acronym cases (CBS, NBC, etc.) need the user to override via the form's
+    "method name override" field — we can't infer them from the snake string.
+    """
+    return ''.join(w.capitalize() for w in s.split('_') if w)
+
+
+def parse_methods_from_form(form) -> list[dict[str, str]]:
+    """
+    Extract selected methods from POSTed form data.
+
+    Expected form fields (per preset):
+        include_linear         (checkbox, presence = True)
+        channel_group_linear   (text, default 'linear')
+        method_name_linear     (text, optional override; default = PascalCase)
+
+        include_live_event
+        channel_group_live_event
+        method_name_live_event
+
+        include_oon
+        channel_group_oon
+        method_name_oon
+
+    Returns:
+        list of {'preset', 'channel_group', 'name'} dicts, one per checked box.
+
+    Raises:
+        ValueError: on invalid channel_group (must be snake_case).
+    """
+    methods = []
+    for preset in ('linear', 'live_event', 'oon'):
+        if form.get(f'include_{preset}') != 'on':
+            continue
+        channel_group = (form.get(f'channel_group_{preset}') or preset).strip()
+        if not _SNAKE_RE.match(channel_group):
+            raise ValueError(
+                f'Invalid channel_group for {preset}: {channel_group!r} — '
+                f'must be snake_case (lowercase, digits, underscores)'
+            )
+        name_override = (form.get(f'method_name_{preset}') or '').strip()
+        name = name_override or snake_to_pascal(channel_group)
+        methods.append({
+            'preset': preset,
+            'channel_group': channel_group,
+            'name': name,
+        })
+    return methods
+
+
+def parse_features_from_form(form) -> set[str]:
+    """
+    Extract feature flags from POSTed form data.
+
+    Expected form fields:
+        feature_boundary_handling   (checkbox)
+        feature_eidr_routing        (checkbox)
+        feature_id3_writing         (checkbox)
+
+    Returns:
+        set of feature name strings.
+    """
+    features: set[str] = set()
+    for feature in ('boundary_handling', 'eidr_routing', 'id3_writing'):
+        if form.get(f'feature_{feature}') == 'on':
+            features.add(feature)
+    return features
+
+
+def build_context(form) -> dict[str, Any]:
+    """
+    Build the Jinja render context from form input.
+
+    Adds the `has_linear` / `has_live_event` / `has_oon` derived booleans so
+    templates can use the short `{% if has_live_event %}` form instead of
+    iterating `methods` inline.
+    """
+    methods = parse_methods_from_form(form)
+    if not methods:
+        raise ValueError('At least one method must be selected')
+
+    features = parse_features_from_form(form)
+
+    return {
+        'plugin_name':   (form.get('plugin_name') or 'plugin').strip(),
+        'client_name':   (form.get('client_name') or 'Client').strip(),
+        'author':        (form.get('author') or 'Uplynk').strip(),
+        'version':       (form.get('version') or '0.0.1').strip(),
+        'today':         date.today().isoformat(),
+        'methods':       methods,
+        'features':      features,
+        'has_linear':     any(m['preset'] == 'linear'     for m in methods),
+        'has_live_event': any(m['preset'] == 'live_event' for m in methods),
+        'has_oon':        any(m['preset'] == 'oon'        for m in methods),
+    }
+
+
+# =============================================================================
+# Routes
+# =============================================================================
+
+@app.route('/', methods=['GET'])
+def index():
+    """Serve the plugin-generation form."""
+    return render_template('form.html')
+
+
+@app.route('/generate', methods=['POST'])
+def generate():
+    """
+    Render templates against form input, package into zip, return as download.
+
+    Returns 400 on validation errors, 500 on template render failures.
+    """
+    try:
+        context = build_context(request.form)
+    except ValueError as e:
+        return f'<pre>Form error: {e}</pre>', 400
+
+    plugin_name = context['plugin_name']
+
+    # -------------------------------------------------------------------------
+    # SKELETON: this first cut produces an empty zip with just a README
+    # confirming the pipeline works. Once the sub-templates are in place, this
+    # block expands to render each and add it to the archive.
+    # -------------------------------------------------------------------------
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr(
+            f'{plugin_name}/README.md',
+            f'# {plugin_name}\n\n'
+            f'Skeleton output — pipeline works.\n\n'
+            f'Context:\n```\n{context}\n```\n'
+        )
+    buf.seek(0)
+
+    return send_file(
+        buf,
+        mimetype='application/zip',
+        as_attachment=True,
+        download_name=f'{plugin_name}.zip',
+    )
+
+
+@app.route('/healthz', methods=['GET'])
+def healthz():
+    """Liveness probe for Portainer/Caddy healthchecks."""
+    return {'status': 'ok'}, 200
+
+
+# =============================================================================
+# Entrypoint
+# =============================================================================
+
+if __name__ == '__main__':
+    # Development server only. In the container, gunicorn drives the app.
+    app.run(host='0.0.0.0', port=5000, debug=True)

@@ -1,0 +1,44 @@
+# =============================================================================
+# scte-plugin-generator — Portainer-managed stack
+# =============================================================================
+# Deployed from GitHub via Portainer's Git repository poll. Fronted by Caddy
+# at plugin.telcomjj.com — see the caddy/Caddyfile in homelab-utility for
+# the reverse-proxy snippet.
+#
+# Networking:
+#   - Container exposes port 5000 on the internal `web` network only.
+#   - No `ports:` publish — Caddy reaches it by service name on the shared
+#     network. Prevents accidental public exposure if Caddy is misconfigured.
+# -----------------------------------------------------------------------------
+
+services:
+  scte-plugin-generator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: scte-plugin-generator:latest
+    container_name: scte-plugin-generator
+    restart: unless-stopped
+    expose:
+      - "5000"
+    networks:
+      - web
+    healthcheck:
+      # Redundant with the Dockerfile HEALTHCHECK — Compose-level version so
+      # `docker compose ps` and Portainer's stack view both report health.
+      test: ["CMD", "python", "-c",
+             "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:5000/healthz',timeout=2).getcode()==200 else 1)"]
+      interval: 30s
+      timeout: 3s
+      start_period: 5s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  web:
+    external: true
+    name: auth-net

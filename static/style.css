@@ -448,3 +448,50 @@ code {
 .btn-primary:hover .btn-arrow {
     transform: translateX(2px);
 }
+
+/* --- Method options (seg_id pair chips) --- */
+.method-options {
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px dashed var(--border-strong);
+}
+
+.options-label {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    color: var(--text-faint);
+    margin-bottom: 8px;
+}
+
+.options-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    border: 1px solid var(--border-strong);
+    border-radius: 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.chip:has(input:checked) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.chip input[type="checkbox"] {
+    width: 11px;
+    height: 11px;
+    accent-color: var(--accent);
+    cursor: pointer;
+}

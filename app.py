@@ -65,24 +65,12 @@ def parse_methods_from_form(form) -> list[dict[str, str]]:
     """
     Extract selected methods from POSTed form data.
 
-    Expected form fields (per preset):
-        include_linear         (checkbox, presence = True)
-        channel_group_linear   (text, default 'linear')
-        method_name_linear     (text, optional override; default = PascalCase)
-
-        include_live_event
-        channel_group_live_event
-        method_name_live_event
-
-        include_oon
-        channel_group_oon
-        method_name_oon
+    For the linear preset, also captures:
+        seg_id_pairs (list[tuple]) — which Type 6 seg_id pairs to handle.
+        Defaults to (34/35, 48/49, 54/55) if no pairs selected.
 
     Returns:
-        list of {'preset', 'channel_group', 'name'} dicts, one per checked box.
-
-    Raises:
-        ValueError: on invalid channel_group (must be snake_case).
+        list of {'preset', 'channel_group', 'name', ...} dicts.
     """
     methods = []
     for preset in ('linear', 'live_event', 'oon'):
@@ -96,11 +84,30 @@ def parse_methods_from_form(form) -> list[dict[str, str]]:
             )
         name_override = (form.get(f'method_name_{preset}') or '').strip()
         name = name_override or snake_to_pascal(channel_group)
-        methods.append({
+        entry = {
             'preset': preset,
             'channel_group': channel_group,
             'name': name,
-        })
+        }
+        if preset == 'linear':
+            pairs = []
+            if form.get('seg_pair_32_33') == 'on':
+                pairs.append((32, 33, 'Chapter'))
+            if form.get('seg_pair_34_35') == 'on':
+                pairs.append((34, 35, 'Break'))
+            if form.get('seg_pair_48_49') == 'on':
+                pairs.append((48, 49, 'Provider Advertisement'))
+            if form.get('seg_pair_54_55') == 'on':
+                pairs.append((54, 55, 'Distributor Placement Opportunity'))
+            # Default: 34/35 + 48/49 + 54/55 if nothing selected
+            if not pairs:
+                pairs = [
+                    (34, 35, 'Break'),
+                    (48, 49, 'Provider Advertisement'),
+                    (54, 55, 'Distributor Placement Opportunity'),
+                ]
+            entry['seg_id_pairs'] = pairs
+        methods.append(entry)
     return methods
 
 

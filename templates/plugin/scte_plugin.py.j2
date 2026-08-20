@@ -1146,10 +1146,10 @@ def Process35(slice_info):
         # Dispatch to channel-group method
         if channel_group == 'scte_logger':
             SCTELogger(slice_info, slicer_id)
-{%- for m in methods %}
+{% for m in methods %}
         elif channel_group == '{{ m.channel_group }}':
             {{ m.name }}(slice_info, slicer_id)
-{%- endfor %}
+{% endfor %}
         else:
             slicer.SlicerLogger(
                 'WARN',

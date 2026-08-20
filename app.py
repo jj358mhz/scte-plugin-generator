@@ -17,6 +17,8 @@ from typing import Any
 from flask import Flask, render_template, request, send_file, abort
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
+GENERATOR_VERSION = '0.0.1'  # bump on meaningful generator changes
+
 app = Flask(__name__)
 
 # -----------------------------------------------------------------------------
@@ -159,6 +161,7 @@ def build_context(form) -> dict[str, Any]:
         'has_linear':     any(m['preset'] == 'linear'     for m in methods),
         'has_live_event': any(m['preset'] == 'live_event' for m in methods),
         'has_oon':        any(m['preset'] == 'oon'        for m in methods),
+        'generator_version': GENERATOR_VERSION,
     }
 
 
@@ -213,7 +216,7 @@ def generate():
 @app.route('/healthz', methods=['GET'])
 def healthz():
     """Liveness probe for Portainer/Caddy healthchecks."""
-    return {'status': 'ok'}, 200
+    return {'status': 'ok', 'generator_version': GENERATOR_VERSION}, 200
 
 
 # =============================================================================

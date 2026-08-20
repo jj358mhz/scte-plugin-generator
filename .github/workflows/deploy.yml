@@ -23,7 +23,7 @@ jobs:
           host: ${{ secrets.DEPLOY_HOST }}
           username: ${{ secrets.DEPLOY_USER }}
           key: ${{ secrets.DEPLOY_SSH_KEY }}
-          port: 22
+          port: 2222
           script: |
             set -e
             cd ~/git/scte-plugin-generator

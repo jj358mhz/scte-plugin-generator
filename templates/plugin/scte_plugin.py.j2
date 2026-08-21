@@ -3,7 +3,7 @@
 
   Renders Sections 1-5 (identity, imports, globals, helpers, async, entrypoints)
   and then includes the per-method sub-templates for each entry in `methods`,
-  plus the always-emitted _method_scte_logger.py.j2.
+  plus the always-emitted _log_helpers.py.j2.
 
   Context expected:
     plugin_name   (str, snake_case)
@@ -1213,11 +1213,18 @@ def Process35(slice_info):
 
 
 # =============================================================================
-# Channel-group methods
+# Logging helpers (always emitted)
 # =============================================================================
+{% include '_log_helpers.py.j2' %}
 
+# =============================================================================
+# SCTELogger diagnostic method (always emitted, channel_group=scte_logger)
+# =============================================================================
 {% include '_method_scte_logger.py.j2' %}
 
+# =============================================================================
+# Channel-group methods
+# =============================================================================
 {% for m in methods %}
 {% if m.preset == 'linear' %}
 {% include '_method_linear.py.j2' %}

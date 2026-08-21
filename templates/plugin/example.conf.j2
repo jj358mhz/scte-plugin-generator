@@ -98,7 +98,6 @@ scte_log_verbosity: 2
 #   - {{ m.channel_group }}  ({{ m.name }})
 {% endfor -%}
 # =============================================================================
-
 {% if has_linear -%}
 channel_group: {% for m in methods if m.preset == 'linear' %}{{ m.channel_group }}{% endfor %}
 {%- elif has_live_event -%}

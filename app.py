@@ -17,7 +17,7 @@ from typing import Any
 from flask import Flask, render_template, request, send_file, abort
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-GENERATOR_VERSION = '0.2.0'  # bump on meaningful generator changes
+GENERATOR_VERSION = '0.3.0'  # bump on meaningful generator changes
 
 app = Flask(__name__)
 
@@ -187,6 +187,7 @@ def generate():
 
     try:
         plugin_source = plugin_env.get_template('scte_plugin.py.j2').render(**context)
+        conf_source = plugin_env.get_template('example.conf.j2').render(**context)
     except Exception as e:
         # Surface Jinja errors to the browser so we can debug template issues
         # in-place during development. Once stable, this can become a 500.
@@ -199,6 +200,7 @@ def generate():
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
         zf.writestr(f'{plugin_name}/scte_{plugin_name}.py', plugin_source)
+        zf.writestr(f'{plugin_name}/uplynk.conf', conf_source)
     buf.seek(0)
 
     return send_file(

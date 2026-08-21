@@ -104,7 +104,7 @@ channel_group: {% for m in methods if m.preset == 'linear' %}{{ m.channel_group 
 channel_group: {% for m in methods if m.preset == 'live_event' %}{{ m.channel_group }}{% endfor %}
 {%- elif has_scte_logger -%}
 channel_group: {% for m in methods if m.preset == 'scte_logger' %}{{ m.channel_group }}{% endfor %}
-{%- endif %}
+{% endif %}
 
 # -----------------------------------------------------------------------------
 # Linear preset config

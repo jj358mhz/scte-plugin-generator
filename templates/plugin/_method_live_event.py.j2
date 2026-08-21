@@ -296,7 +296,7 @@ def {{ m.name }}(slice_info, slicer_id):
                         f'<{live_event_id}>', command_type=command_type, segmentation_type_id=19,
                         call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
 
-                    # Initialize slate GUIDs to None to avoid reference-before-assignment
+                    # Initialize slate GUIDs to "None" to avoid reference-before-assignment
                     halftime_slate_guid = None
                     techdiff_slate_guid = None
                     terminal_slate_guid = None
@@ -450,7 +450,7 @@ def {{ m.name }}(slice_info, slicer_id):
                 log('[upl-py_Err] Warning: There are no descriptors in command type 6',
                     command_type=command_type, slicer_version=slicer_version, stream_type=stream_type)
 
-                # ══════════════════════════════════════════════════════════════════════
+        # ══════════════════════════════════════════════════════════════════════
         # Command Type 5 — Splice Insert (Ad breaks: Types 54/55)
         # ══════════════════════════════════════════════════════════════════════
         elif command_type == 5:

@@ -75,7 +75,7 @@ def parse_methods_from_form(form) -> list[dict[str, str]]:
         list of {'preset', 'channel_group', 'name', ...} dicts.
     """
     methods = []
-    for preset in ('linear', 'live_event', 'oon'):
+    for preset in ('linear', 'live_event', 'scte_logger'):
         if form.get(f'include_{preset}') != 'on':
             continue
         channel_group = (form.get(f'channel_group_{preset}') or preset).strip()
@@ -141,12 +141,8 @@ def build_context(form) -> dict[str, Any]:
     iterating `methods` inline.
     """
     methods = parse_methods_from_form(form)
-    # NOTE: temporarily allowed while method sub-templates are being fleshed out.
-    # SCTELogger is always emitted, so a zero-method plugin still produces a
-    # valid diagnostic-only scaffold. Re-add the "must select at least one"
-    # check once _method_linear/_live_event/_oon.py.j2 are all in place.
-    #if not methods:
-     #   raise ValueError('At least one method must be selected')
+    if not methods:
+        raise ValueError('At least one method must be selected')
 
     features = parse_features_from_form(form)
 
@@ -158,12 +154,12 @@ def build_context(form) -> dict[str, Any]:
         'today':         date.today().isoformat(),
         'methods':       methods,
         'features':      features,
-        'has_linear':     any(m['preset'] == 'linear'     for m in methods),
-        'has_live_event': any(m['preset'] == 'live_event' for m in methods),
-        'has_oon':        any(m['preset'] == 'oon'        for m in methods),
+        'has_linear':      any(m['preset'] == 'linear'      for m in methods),
+        'has_live_event':  any(m['preset'] == 'live_event'  for m in methods),
+        'has_oon':         False,  # oon preset removed from form; scaffolding kept dormant for future
+        'has_scte_logger': any(m['preset'] == 'scte_logger' for m in methods),
         'generator_version': GENERATOR_VERSION,
     }
-
 
 # =============================================================================
 # Routes

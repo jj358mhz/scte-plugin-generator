@@ -80,8 +80,7 @@
             <div class="section-label">Methods</div>
             <p class="section-help">
                 Check any 1–3. Each generates a channel-group method dispatched from
-                <code>Process35</code>. <code>SCTELogger</code> is always included as a
-                diagnostic fallback (<code>channel_group: scte_logger</code>).
+                <code>Process35</code>.
             </p>
 
             <div class="method-grid">
@@ -158,29 +157,31 @@
                         </div>
                     </div>
                 </label>
-
-                {# --- OON method --- #}
+                
+                {# --- SCTELogger method --- #}
                 <label class="method-card">
-                    <input type="checkbox" name="include_oon" value="on" class="method-check">
+                    <input type="checkbox" name="include_scte_logger" value="on" class="method-check">
                     <div class="method-header">
-                        <span class="method-title">OON</span>
-                        <span class="method-tag">oon_boundary</span>
+                        <span class="method-title">SCTE Logger</span>
+                        <span class="method-tag">scte_logger</span>
                     </div>
                     <p class="method-desc">
-                        P1Media-style OON handler with async <code>slicer.WebCall</code>
-                        for EPG title enrichment. State-machine tracking, stale-ad recovery,
-                        blackout init.
+                        Parse-and-log-only diagnostic method for evaluating new customer
+                        SCTE workflows. Logs every SCTE-35 seg type (hex + decimal), UPID,
+                        PTS, and duration — takes no slicer action. Enable during customer
+                        onboarding to characterize their signaling before implementing a
+                        production method.
                     </p>
                     <div class="method-fields">
                         <div class="field">
                             <label>channel_group</label>
-                            <input type="text" name="channel_group_oon"
-                                   pattern="[a-z][a-z0-9_]*" value="oon_boundary">
+                            <input type="text" name="channel_group_scte_logger"
+                                   pattern="[a-z][a-z0-9_]*" value="scte_logger">
                         </div>
                         <div class="field">
                             <label>method name override</label>
-                            <input type="text" name="method_name_oon"
-                                   pattern="[A-Z][A-Za-z0-9]*" placeholder="OonBoundary">
+                            <input type="text" name="method_name_scte_logger"
+                                   pattern="[A-Z][A-Za-z0-9]*" value="SCTELogger">
                         </div>
                     </div>
                 </label>

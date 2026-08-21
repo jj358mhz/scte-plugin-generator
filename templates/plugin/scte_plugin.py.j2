@@ -24,7 +24,6 @@ Methods:
 {%- for m in methods %}
     {{ m.name }} — channel_group={{ m.channel_group }}, preset={{ m.preset }}
 {%- endfor %}
-    SCTELogger — channel_group=scte_logger (diagnostic, always available)
 
 Generated: {{ today }}
 
@@ -1048,6 +1047,8 @@ def le_epoch_times(pts: int) -> dict:
     return {'now_epoch_ms': now_epoch_ms, 'pts_epoch_ms': pts_epoch_ms}
 {% endif %}
 {% if 'id3_writing' in features %}
+
+
 # =============================================================================
 # ID3 file writer
 # =============================================================================
@@ -1176,19 +1177,21 @@ def Process35(slice_info):
             )
 
         # Dispatch to channel-group method
-        if channel_group == 'scte_logger':
-            SCTELogger(slice_info, slicer_id)
 {% for m in methods %}
+{% if loop.first %}
+        if channel_group == '{{ m.channel_group }}':
+{% else %}
         elif channel_group == '{{ m.channel_group }}':
+{% endif %}
             {{ m.name }}(slice_info, slicer_id)
 {% endfor %}
         else:
             slicer.SlicerLogger(
                 'WARN',
                 f'[upl-py_Warn] Unrecognized channel_group={channel_group}, '
-                f'expected one of: scte_logger'
+                f'expected one of: '
 {% for m in methods %}
-                f', {{ m.channel_group }}'
+                f'{{ ", " if not loop.first else "" }}{{ m.channel_group }}'
 {% endfor %}
             )
 
@@ -1218,11 +1221,6 @@ def Process35(slice_info):
 {% include '_log_helpers.py.j2' %}
 
 # =============================================================================
-# SCTELogger diagnostic method (always emitted, channel_group=scte_logger)
-# =============================================================================
-{% include '_method_scte_logger.py.j2' %}
-
-# =============================================================================
 # Channel-group methods
 # =============================================================================
 {% for m in methods %}
@@ -1230,7 +1228,7 @@ def Process35(slice_info):
 {% include '_method_linear.py.j2' %}
 {% elif m.preset == 'live_event' %}
 {% include '_method_live_event.py.j2' %}
-{% elif m.preset == 'oon' %}
-{% include '_method_oon.py.j2' %}
+{% elif m.preset == 'scte_logger' %}
+{% include '_method_scte_logger.py.j2' %}
 {% endif %}
 {% endfor %}

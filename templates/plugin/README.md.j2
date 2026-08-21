@@ -1,0 +1,368 @@
+# 📺 scte_{{ plugin_name }}
+
+🎬 SCTE-35 signal-handling plugin for the Uplynk LiveSlicer.
+
+- 👤 **Client:** {{ client_name }}
+- ✍️ **Author:** {{ author }}
+- 🏷️ **Plugin version:** {{ version }}
+- 🛠️ **Generated:** {{ today }} by [scte-plugin-generator](https://github.com/jj358mhz/scte-plugin-generator) v{{ generator_version }}
+
+---
+
+## 📖 Table of contents
+
+- [🎯 What this plugin does](#-what-this-plugin-does)
+- [👥 End-user guide](#-end-user-guide)
+  - [📦 Installation](#-installation)
+  - [⚙️ Configuration](#️-configuration)
+  - [🎬 Presets included in this build](#-presets-included-in-this-build)
+  - [🎛️ Features enabled in this build](#️-features-enabled-in-this-build)
+  - [✅ Verifying it works](#-verifying-it-works)
+  - [🔧 Troubleshooting](#-troubleshooting)
+- [🧑‍💻 Developer guide](#-developer-guide)
+  - [🏗️ Architecture](#️-architecture)
+  - [🔌 Extending the plugin](#-extending-the-plugin)
+- [📚 SCTE-35 refresher](#-scte-35-refresher)
+
+---
+
+## 🎯 What this plugin does
+
+`scte_{{ plugin_name }}.py` is a Python SCTE-35 handler loaded by the Uplynk
+LiveSlicer at startup. 📡 When the slicer receives a SCTE-35 message on its
+input, it hands the parsed message to this plugin, which decides what to do:
+fire an ad break, resolve a slate, log the signal for analysis, dispatch an
+external API call, or ignore it.
+
+This build ships with the following presets and features:
+
+**🎬 Presets:**
+{% for m in methods %}
+- `{{ m.channel_group }}` &rarr; `{{ m.name }}()`
+{% endfor %}
+
+**🎛️ Features:**
+{% if features %}
+{% for f in features %}
+- `{{ f }}`
+{% endfor %}
+{% else %}
+- _(none)_
+{% endif %}
+
+---
+
+# 👥 End-user guide
+
+## 📦 Installation
+
+1. 📤 Copy `scte_{{ plugin_name }}.py` to the slicer's plugin directory:
+
+```bash
+   scp scte_{{ plugin_name }}.py user@slicer:/opt/uplynk/plugins/
+```
+
+2. 🔐 Set permissions:
+
+```bash
+   ssh user@slicer 'chmod 644 /opt/uplynk/plugins/scte_{{ plugin_name }}.py'
+```
+
+3. 📝 Place `uplynk.conf` at the slicer's config path (typically `/etc/uplynk/uplynk.conf`).
+   Edit it first — see [⚙️ Configuration](#️-configuration).
+
+4. 🔄 Restart the slicer service so it picks up the new plugin and config:
+
+```bash
+   ssh user@slicer 'sudo systemctl restart uplynk-slicer'
+```
+
+## ⚙️ Configuration
+
+The generator emits a reference `uplynk.conf` alongside this plugin. ⚠️ Before
+deploying, replace every `<CHANGEME_*>` placeholder with real values.
+
+Key config lines that wire this plugin in:
+
+| 🔑 Key | 📥 Value | 🎯 Purpose |
+|--------|----------|------------|
+| `scte_type` | `python` | 🐍 Tells the slicer this is a Python plugin |
+| `scte_module` | `/opt/uplynk/plugins/scte_{{ plugin_name }}.py` | 📂 Where the plugin lives |
+| `scte_python_version` | `3.8` | 🐍 Python runtime the slicer uses |
+| `scte_log_verbosity` | `2` | 🔊 0=quiet, 1=info, 2=verbose, 3=debug |
+| `channel_group` | {% for m in methods %}`{{ m.channel_group }}`{% if not loop.last %}, {% endif %}{% endfor %} | 🎚️ Selects which method handles SCTE for this slicer |
+
+💡 Exactly one `channel_group` value is active per slicer config. If you're
+running multiple slicers off the same plugin, each one's `uplynk.conf`
+picks its own `channel_group`.
+
+## 🎬 Presets included in this build
+
+{% if has_linear %}
+### 📺 `linear` &rarr; `{% for m in methods if m.preset == 'linear' %}{{ m.name }}{% endfor %}()`
+
+Handles standard linear ad-insertion SCTE-35 traffic. 📢 Fires ad-break
+start/end on segmentation descriptor pairs:
+
+{% for m in methods if m.preset == 'linear' %}
+{% for pair in m.seg_id_pairs %}
+- 🔢 Type `{{ pair[0] }}` / `{{ pair[1] }}` &mdash; {{ pair[2] }}
+{% endfor %}
+{% endfor %}
+
+✅ Use this preset for standard commercial broadcast feeds where every SCTE-35
+message is a straightforward break signal.
+
+{% endif %}
+{% if has_live_event %}
+### 🎥 `live_event` &rarr; `{% for m in methods if m.preset == 'live_event' %}{{ m.name }}{% endfor %}()`
+
+Handles Disney-style live event lifecycle signaling: program start/end,
+mid-event slate breakaways and resumes, and provider placement opportunities.
+🎯 Handles these SCTE-35 segmentation types:
+
+- 0️⃣ `0x00` &mdash; Not indicated (informational)
+- 🟢 `0x10` (16) &mdash; Program Start
+- 🔴 `0x11` (17) &mdash; Program End
+- ⏸️ `0x13` (19) &mdash; Program Breakaway (slate cut-in)
+- ▶️ `0x14` (20) &mdash; Program Resumption (slate cut-out)
+- 📣 `0x36` (54) &mdash; Distributor Placement Opportunity Start
+- 🔚 `0x37` (55) &mdash; Distributor Placement Opportunity End
+
+⚙️ Additional config keys (see `uplynk.conf`):
+
+- 📛 `call_sign` &mdash; feed identifier, used in EPG lookups and log lines
+- ⏱️ `event_start_extension` / `event_end_extension` &mdash; float seconds; nudge
+  program boundaries earlier/later
+- 📡 `stream_type` &mdash; `0`=network, `1`=affiliate
+- 🎚️ `local_mode` / `passthrough_mode` / `outofnetwork_mode` &mdash; boolean-ish
+  ints, gate specific behaviors
+- ⏳ `duration_offset_*` &mdash; per-type duration correction (seconds)
+- 🕒 `pts_offset_*` &mdash; per-type PTS timing correction (seconds)
+- 🖼️ `midevent_slate_guid_fallback` &mdash; slate GUID to use if the lookup
+  table doesn't resolve one for a given event
+
+✅ Use this preset for live sports, awards shows, or any feed where program
+boundaries and slate transitions matter more than fixed ad breaks.
+
+{% endif %}
+{% if has_scte_logger %}
+### 🔍 `scte_logger` &rarr; `{% for m in methods if m.preset == 'scte_logger' %}{{ m.name }}{% endfor %}()`
+
+🩺 Diagnostic-only preset. Logs every SCTE-35 message the slicer receives
+without firing any ad breaks or slates. Use this to characterize a new
+customer's SCTE feed before choosing a production preset.
+
+📊 Covers all standardized SCTE-35 segmentation type_ids (0x00–0x51) plus
+graceful fallback for unknown/customer-defined types. Every log line
+includes both hex and decimal representations (e.g. `Type 34 (0x22)`).
+
+🛡️ UPID decoding is graceful — non-UTF-8 UPIDs are rendered as binary hex
+rather than crashing the plugin.
+
+💡 Turn up `scte_log_verbosity` in `uplynk.conf` if you want more detail.
+
+{% endif %}
+
+## 🎛️ Features enabled in this build
+
+{% if 'boundary_handling' in features %}
+### 🚧 `boundary_handling`
+
+Adds `AdStart`/`AdEnd` boundary signaling around SCTE-35-driven breaks so
+downstream systems can synchronize.
+
+{% endif %}
+{% if 'eidr_routing' in features %}
+### 🗺️ `eidr_routing`
+
+Routes ad decisioning by EIDR (Entertainment Identifier Registry) ID
+extracted from the SCTE-35 UPID field. Set `eidr_default_channel` in
+`uplynk.conf` for the fallback route.
+
+{% endif %}
+{% if 'id3_writing' in features %}
+### 🏷️ `id3_writing`
+
+Writes ID3 tags into the outbound stream keyed on SCTE-35 events. Set
+`id3_enable` and `id3_mode` in `uplynk.conf` to control emission.
+
+{% endif %}
+{% if not features %}
+_🚫 No optional features enabled in this build._
+
+{% endif %}
+
+## ✅ Verifying it works
+
+After restarting the slicer, 📜 tail its log:
+
+```bash
+ssh user@slicer 'sudo journalctl -u uplynk-slicer -f'
+```
+
+You should see plugin-load banner lines including:
+
+- 📦 `scte_{{ plugin_name }}.py` loaded
+- 🏷️ Generator version `{{ generator_version }}`
+- 🎚️ Selected `channel_group` and its method name
+- 🖥️ HOST and PROC_ID reported by the `log()` function
+
+📡 When SCTE-35 messages arrive, look for log lines from the active method
+(prefixed with the method name, uppercase severity, and a leak-safe
+`scte_message` summary). If you selected the `scte_logger` preset, every
+message will produce a descriptor breakdown even if no action is taken.
+
+## 🔧 Troubleshooting
+
+**❌ Plugin doesn't load at all.** Check `scte_module` path in `uplynk.conf`
+matches where you copied the file. Check file permissions (`644` or looser).
+Check the slicer log for Python import errors.
+
+**😶 Plugin loads but doesn't react.** Check `channel_group` in `uplynk.conf`
+matches one of this build's presets: {% for m in methods %}`{{ m.channel_group }}`{% if not loop.last %}, {% endif %}{% endfor %}. A typo here means the dispatcher's fallback fires (no-op with a warning log).
+
+**⚠️ "channel_group X not recognized" in the log.** Same as above — dispatcher
+didn't match `channel_group` to any registered method.
+
+**📭 SCTE-35 messages arrive but nothing fires.** Bump `scte_log_verbosity` to
+`3` and re-check. Verify the message's segmentation type_id is one this
+preset handles (see [🎬 Presets](#-presets-included-in-this-build) above).
+
+**⏰ Ad breaks fire at the wrong time.** For `live_event`, tune `pts_offset_*`
+and `duration_offset_*` in `uplynk.conf`. Small float values (fractions of
+a second) are normal.
+
+**🔣 UPID decoding shows binary hex instead of a readable string.** Not a bug
+— the UPID isn't UTF-8 text (probably a binary EIDR or MPU identifier).
+The hex is the raw payload; decode it upstream if you need a semantic value.
+
+---
+
+# 🧑‍💻 Developer guide
+
+## 🏗️ Architecture
+
+The generated plugin file is organized into 5 sections plus entrypoints:
+
+scte_{{ plugin_name }}.py
+├── 📥 Section 1: Imports and module constants
+├── 🌐 Section 2: Global state
+│ ├── PLUGIN_STATE, PLUGIN_STATE_LASTMOD (dormant unless OON preset revived)
+│ ├── PENDING_CALLS (dormant unless OON preset revived)
+│ └── AD_META_KEYS, API_URL, UAC_MODE (dormant unless OON preset revived)
+├── ⚙️ Section 3: Config parsing helpers
+│ ├── _parse_bool_config(), _parse_int_config(), _parse_float_config()
+│ ├── call_sign(), api_url(), ad_meta_keys(), meta_key(), uac_mode()
+│ └── Leak-safe scte_message summary builder
+├── 📜 Section 4: Helpers used by log()
+│ ├── HOST / PROC_ID discovery
+│ ├── Frame introspection (caller filename + line number)
+│ ├── Uppercase log level normalization
+│ └── Redacted apikey copy for log output
+├── 🎬 Section 5: Method implementations
+{% for m in methods %}
+│ ├── {{ m.name }}() # channel_group={{ m.channel_group }}
+{% endfor %}
+│ └── (dispatched from Process35)
+└── 🚪 Entrypoints
+├── Process35(scte_message, ...) # main SCTE dispatcher, loops methods
+└── HandleCall(...) # async callback dispatcher
+
+🔁 The `Process35` dispatcher is loop-driven: it iterates registered methods
+and calls whichever one matches the slicer's `channel_group`. Adding a
+new preset means adding a new method function and registering it in the
+methods loop — no dispatcher rewrite.
+
+### 📞 Method contract
+
+Every method (`{% for m in methods %}{{ m.name }}(){% if not loop.last %}, {% endif %}{% endfor %}`) receives the same argument shape from `Process35`:
+
+- 📨 The parsed SCTE-35 message (as a dict-like object)
+- 🕒 Slicer version, stream type, PTS, PTS offset, and other timing context
+- ⚙️ Config-derived values (call sign, ID3 mode, etc.)
+
+🔇 Return value is ignored — methods act via side effects (calling `slicer.*`
+APIs to fire breaks, slates, or ID3 tags).
+
+## 🔌 Extending the plugin
+
+Two common extensions:
+
+**➕ Add a new channel_group.** Copy an existing method (e.g. `{% if has_live_event %}{% for m in methods if m.preset == 'live_event' %}{{ m.name }}{% endfor %}{% else %}{% for m in methods %}{% if loop.first %}{{ m.name }}{% endif %}{% endfor %}{% endif %}`) in Section 5, rename it, adjust the segmentation
+type_id branches to what your new customer sends, and register it in the
+`Process35` methods loop. Then add a `channel_group: <new_name>` entry to
+`uplynk.conf` on the slicer(s) that should use it.
+
+**🔢 Handle a new SCTE-35 segmentation type_id.** Find the method for the
+relevant `channel_group`, add an `elif type_id == 0x??:` branch, and
+implement the action (slicer API call, log line, whatever).
+
+💡 For non-trivial changes, regenerate the plugin from the source templates
+rather than hand-editing — see the [scte-plugin-generator repo](https://github.com/jj358mhz/scte-plugin-generator).
+
+---
+
+# 📚 SCTE-35 refresher
+
+📖 SCTE-35 is the SMPTE standard for carrying ad-insertion and program-boundary
+cues in an MPEG transport stream. Each message contains a **command** and
+zero or more **segmentation descriptors**.
+
+## 🎮 Command types
+
+| 🔢 Value | 🏷️ Name | 🎯 Meaning |
+|----------|---------|------------|
+| `0x00` | `splice_null` | 💓 Heartbeat, no action |
+| `0x04` | `splice_schedule` | 📅 Scheduled splice (rare in live) |
+| `0x05` | `splice_insert` | 📢 The classic ad-break signal (in/out points, duration) |
+| `0x06` | `time_signal` | 🕒 Timing marker; usually paired with a segmentation_descriptor |
+| `0x07` | `bandwidth_reservation` | 📊 Reserved capacity signal |
+| `0xFF` | `private_command` | 🔒 Vendor-specific extension |
+
+💡 Most modern SCTE-35 in the wild is either `splice_insert` (command_type 5)
+or `time_signal` with a segmentation descriptor (command_type 6).
+
+## 🔢 Segmentation type_ids (the ones you'll see most)
+
+| 🔣 Hex | 🔢 Dec | 🏷️ Name |
+|--------|--------|---------|
+| `0x00` | 0 | ⚪ Not Indicated |
+| `0x10` | 16 | 🟢 Program Start |
+| `0x11` | 17 | 🔴 Program End |
+| `0x13` | 19 | ⏸️ Program Breakaway |
+| `0x14` | 20 | ▶️ Program Resumption |
+| `0x20` | 32 | 📖 Chapter Start |
+| `0x21` | 33 | 📕 Chapter End |
+| `0x22` | 34 | 🎬 Break Start |
+| `0x23` | 35 | 🎞️ Break End |
+| `0x30` | 48 | 📣 Provider Advertisement Start |
+| `0x31` | 49 | 🔚 Provider Advertisement End |
+| `0x34` | 52 | 🎯 Provider Placement Opportunity Start |
+| `0x35` | 53 | 🏁 Provider Placement Opportunity End |
+| `0x36` | 54 | 📡 Distributor Placement Opportunity Start |
+| `0x37` | 55 | 📴 Distributor Placement Opportunity End |
+| `0x40` | 64 | ⚡ Unscheduled Event Start |
+| `0x41` | 65 | 🛑 Unscheduled Event End |
+| `0x50` | 80 | 🌐 Network Start |
+| `0x51` | 81 | 🔌 Network End |
+
+🔗 Start/end type_ids come in pairs (34/35, 48/49, 54/55, etc.) — a `Start`
+means "an event is beginning at this PTS", the matching `End` means
+"it's over". Some workflows use `Provider` types (0x30/0x31) for ads
+inserted by the network; others use `Distributor` types (0x36/0x37) for
+ads inserted by the affiliate.
+
+## 🆔 UPIDs
+
+🔖 Every segmentation descriptor can carry a **UPID** (Unique Program
+Identifier) — a variable-length payload identifying what's being signaled.
+UPID types include ad-ID, EIDR, ISAN, TID, MPU, and free-text formats.
+
+🛡️ The `scte_logger` preset (if included in this build) tries UTF-8 decoding
+first and falls back to raw hex if that fails — because binary UPIDs are
+common in the wild.
+
+---
+
+✨ _Generated by [scte-plugin-generator](https://github.com/jj358mhz/scte-plugin-generator) v{{ generator_version }} on {{ today }}._

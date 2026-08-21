@@ -171,3 +171,281 @@ def {{ m.name }}(slice_info, slicer_id):
                     # Register callback and return immediately
                     get_event_payload(external_id, slicer_id, _type16_callback)
                     return
+
+                # ──────────────────────────────────────────────────────────────
+                # Type 17 (0x11) — Program End (Live Event End)
+                # ──────────────────────────────────────────────────────────────
+                if 17 in seg_type_list:
+                    pts_offset = pts_off_x(17)
+                    log(f'[upl-py_Off] From 17, pts_offset set as: {pts_offset} pts',
+                        command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                        slicer_version=slicer_version, stream_type=stream_type)
+
+                    try:
+                        ExternalID = EXTERNAL_ID[-1]
+                        log(f'[upl-py_LE] From 17, ExternalID lookup from list is: {ExternalID}',
+                            command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                    except IndexError:
+                        log(f'[upl-py_Err] From 17, EXTERNAL_ID list is empty — no prior Type 16, skipping',
+                            command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+                    except Exception as error:
+                        log(f'[upl-py_Err] From 17, Could not fetch ExternalID: {error}\n{traceback.format_exc()}',
+                            command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+
+                    # None sentinel set by start_event when API failed to return event_id
+                    live_event_id = LIVE_EVENT_ID.get(ExternalID)
+                    if not live_event_id:
+                        log(f'[upl-py_Err] From 17, no valid Live Event ID for <{ExternalID}> — '
+                            f'Type 16 start may have failed, skipping',
+                            command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+                    assert isinstance(live_event_id, str)  # narrows type for PyCharm; guard above proves it
+                    log(f'[upl-py_LE] From 17, ExternalID is: <{ExternalID}> | Live event ID is: '
+                        f'<{live_event_id}>', slicer_version=slicer_version, stream_type=stream_type)
+
+                    try:
+                        # End ad break before ending the event
+                        if slicer.GetState() == 'adbreak':
+                            pts_offset = pts_off_x(17)
+                            log(f'[upl-py_Off] From 17, pts_offset set as: {pts_offset} pts | '
+                                f'Affiliate Pod End at {pts + pts_offset} pts', command_type=command_type,
+                                segmentation_type_id=17, call_sign=call_sign, stream_type=stream_type)
+                            slicer.FlushBreakMeta(int(pts + pts_offset))
+                            slicer.AdEnd(int(pts + pts_offset))
+                        else:
+                            log(f'[upl-py_Ad] From 17, slicer not in ad break state, ending the event '
+                                f'normally', command_type=command_type, segmentation_type_id=17,
+                                call_sign=call_sign, stream_type=stream_type)
+                    except Exception as error:
+                        log(f'[upl-py_Err] From 17, Error ending ad break: {error}',
+                            command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+
+                    try:
+                        end_extension = live_event_end_ext()
+                        end_time_epoch = le_epoch_times(end_extension)
+
+                        event_end_dict = {
+                            'state': 'Blackout',
+                            'id': live_event_id,
+                            'new_beam': True
+                        }
+                        event_json_payload = json.dumps(event_end_dict)
+                        log(f'[upl-py_LE] From 17, event_json_payload is: {event_json_payload}',
+                            command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                            slicer_id=slicer_id, slicer_version=slicer_version, stream_type=stream_type)
+
+                        log(f'[upl-py_LE] From 17, Ending Live Event <{live_event_id}> | end time '
+                            f'extension is: <{end_extension}> | end time epoch is: <{end_time_epoch}> | '
+                            f'placing the slicer into blackout at: {pts + pts_offset} pts.',
+                            command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                            slicer_id=slicer_id, slicer_version=slicer_version, stream_type=stream_type)
+                        slicer.APICall(LIVE_EVENT_END_URL, event_json_payload)
+                        slicer.Blackout(int(pts + pts_offset))
+                    except Exception as error:
+                        log(f'[upl-py_Err] From 17, Could not end event: {live_event_id} | {error}',
+                            command_type=command_type, segmentation_type_id=17, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+
+                # ──────────────────────────────────────────────────────────────
+                # Type 19 (0x13) — Program Breakaway (mid-event slate start)
+                # ──────────────────────────────────────────────────────────────
+                if 19 in seg_type_list:
+                    index = seg_type_list.index(19)
+                    seg_id_index = seg_id_indices[index]
+                    pts_offset_19 = pts_off_x(19)
+                    log(f'[upl-py_Off] From 19, pts_offset set as: {pts_offset_19} pts',
+                        command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                        slicer_version=slicer_version, stream_type=stream_type)
+
+                    try:
+                        scte_slate_type_bytes = slice_info['descriptors'][seg_id_index]['segmentation_upid']
+                        scte_slate_type = scte_slate_type_bytes.decode('utf-8')
+                    except (IndexError, KeyError, AttributeError, UnicodeDecodeError) as decode_err:
+                        log(f'[upl-py_Err] From 19, Could not decode SCTE slate type UPID: {decode_err}\n'
+                            f'{traceback.format_exc()}',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+
+                    try:
+                        ExternalID = EXTERNAL_ID[-1]
+                    except IndexError:
+                        log(f'[upl-py_Err] From 19, EXTERNAL_ID list is empty — no prior Type 16, skipping',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+
+                    # None sentinel set by start_event when API failed to return event_id
+                    live_event_id = LIVE_EVENT_ID.get(ExternalID)
+                    if not live_event_id:
+                        log(f'[upl-py_Err] From 19, no valid Live Event ID for <{ExternalID}> — '
+                            f'Type 16 start may have failed, skipping',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+                    assert isinstance(live_event_id, str)  # narrows type for PyCharm; guard above proves it
+                    log(f'[upl-py_LE] From 19, ExternalID is: <{ExternalID}> | Live event ID is: '
+                        f'<{live_event_id}>', command_type=command_type, segmentation_type_id=19,
+                        call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
+
+                    # Initialize slate GUIDs to None to avoid reference-before-assignment
+                    halftime_slate_guid = None
+                    techdiff_slate_guid = None
+                    terminal_slate_guid = None
+                    weather_slate_guid = None
+
+                    try:
+                        log(f'[upl-py_Slate] From 19, Live event payload dictionary is: <{LIVE_EVENT_PAYLOAD}>',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+
+                        # Post-hardening shape: dict with 'events' key holding list of event dicts.
+                        # Guard against legacy bare-list shape too.
+                        payload_entry = LIVE_EVENT_PAYLOAD.get(ExternalID) if isinstance(LIVE_EVENT_PAYLOAD,
+                                                                                         dict) else None
+                        events_list = None
+                        if isinstance(payload_entry, dict):
+                            events_list = payload_entry.get('events')
+                        elif isinstance(payload_entry, list):
+                            events_list = payload_entry
+
+                        if events_list and isinstance(events_list, list) and isinstance(events_list[0], dict):
+                            first_event = events_list[0]
+                            meta = first_event.get('meta', {}) or {}
+                            halftime_slate_guid = meta.get('slate_halftime')
+                            techdiff_slate_guid = meta.get('slate_techdiff')
+                            weather_slate_guid = meta.get('slate_weather')
+                            terminal_slate_guid = first_event.get('post_slate')
+
+                            log(f'[upl-py_Slate] From 19, Extracted slate GUIDs — '
+                                f'halftime: <{halftime_slate_guid or "None"}> | '
+                                f'techdiff: <{techdiff_slate_guid or "None"}> | '
+                                f'terminal: <{terminal_slate_guid or "None"}> | '
+                                f'weather: <{weather_slate_guid or "None"}>',
+                                command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                        else:
+                            log(f'[upl-py_Err] From 19, LIVE_EVENT_PAYLOAD for <{ExternalID}> has unexpected '
+                                f'shape, no slate GUIDs extracted',
+                                command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+
+                    except Exception as error:
+                        log(f'[upl-py_Err] From 19, Could not gather slate GUIDs: {error}\n'
+                            f'{traceback.format_exc()}',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+
+                    # Map SCTE slate type to the corresponding GUID
+                    slate_guid_map = {
+                        'slate:halftime': halftime_slate_guid,
+                        'slate:techdiff': techdiff_slate_guid,
+                        'slate:terminal': terminal_slate_guid,
+                        'slate:weather': weather_slate_guid,
+                    }
+                    if scte_slate_type not in slate_guid_map:
+                        log(f'[upl-py_Err] From 19, Unrecognized slate type: {scte_slate_type}, skipping',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+                    scte_slate_guid = slate_guid_map[scte_slate_type]
+
+                    # Guard against firing the API with a None GUID
+                    if not scte_slate_guid:
+                        log(f'[upl-py_Err] From 19, No GUID found for slate type <{scte_slate_type}> in event '
+                            f'payload, skipping slate insertion',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+                    assert isinstance(scte_slate_guid, str)  # narrows type for PyCharm; guard above proves it
+
+                    try:
+                        slate_data_dict = {
+                            'slate_id': scte_slate_guid,
+                            'id': live_event_id
+                        }
+                        slate_json_payload = json.dumps(slate_data_dict)
+                        log(f'[upl-py_Slate] From 19, slate_json_payload is: {slate_json_payload}',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_id=slicer_id, slicer_version=slicer_version, stream_type=stream_type)
+
+                        log(f'[upl-py_Slate] From 19, SCTE slate UPID: <{scte_slate_type}> | slate GUID: '
+                            f'<{scte_slate_guid}> start at {pts + pts_offset_19} pts',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        slicer.Blackout(int(pts + pts_offset_19))
+                        slicer.APICall(LIVE_EVENT_STATE_URL, slate_json_payload)
+                    except Exception as error:
+                        log(f'[upl-py_Err] From 19, Could not trigger SCTE slate — UPID: <{scte_slate_type}>, '
+                            f'GUID: <{scte_slate_guid}>: {error}\n{traceback.format_exc()}',
+                            command_type=command_type, segmentation_type_id=19, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+
+                # ──────────────────────────────────────────────────────────────
+                # Type 20 (0x14) — Program Resumption (mid-event slate end)
+                # ──────────────────────────────────────────────────────────────
+                if 20 in seg_type_list:
+                    pts_offset_20 = pts_off_x(20)
+                    log(f'[upl-py_Off] From 20, pts_offset set as: {pts_offset_20} pts',
+                        command_type=command_type, segmentation_type_id=20, call_sign=call_sign,
+                        slicer_version=slicer_version, stream_type=stream_type)
+
+                    try:
+                        ExternalID = EXTERNAL_ID[-1]
+                        log(f'[upl-py_LE] From 20, ExternalID lookup from list is: <{ExternalID}>',
+                            command_type=command_type, segmentation_type_id=20, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                    except IndexError:
+                        log(f'[upl-py_Err] From 20, EXTERNAL_ID list is empty — no prior Type 16, skipping',
+                            command_type=command_type, segmentation_type_id=20, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+
+                    # None sentinel set by start_event when API failed to return event_id
+                    live_event_id = LIVE_EVENT_ID.get(ExternalID)
+                    if not live_event_id:
+                        log(f'[upl-py_Err] From 20, no valid Live Event ID for <{ExternalID}> — '
+                            f'Type 16 start may have failed, skipping',
+                            command_type=command_type, segmentation_type_id=20, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        return
+                    assert isinstance(live_event_id, str)  # narrows type for PyCharm; guard above proves it
+                    log(f'[upl-py_Slate] From 20, ExternalID is: <{ExternalID}> | Live event ID is: '
+                        f'<{live_event_id}>', command_type=command_type, segmentation_type_id=20,
+                        call_sign=call_sign, slicer_version=slicer_version, stream_type=stream_type)
+
+                    try:
+                        content_data_dict = {
+                            'state': 'Slicer',
+                            'id': live_event_id,
+                            'new_beam': True
+                        }
+                        content_json_payload = json.dumps(content_data_dict)
+                        log(f'[upl-py_Slate] From 20, content_json_payload is: {content_json_payload}',
+                            command_type=command_type, segmentation_type_id=20, call_sign=call_sign,
+                            slicer_id=slicer_id, slicer_version=slicer_version, stream_type=stream_type)
+
+                        log(f'[upl-py_Slate] From 20, Content Start at {pts + pts_offset_20} pts for '
+                            f'Live Event ID: <{live_event_id}>', command_type=command_type,
+                            segmentation_type_id=20, call_sign=call_sign, slicer_version=slicer_version,
+                            stream_type=stream_type)
+                        slicer.APICall(LIVE_EVENT_STATE_URL, content_json_payload)
+                        slicer.ContentStart(int(pts + pts_offset_20))
+                    except Exception as error:
+                        log(f'[upl-py_Err] From 20, Could not resume content for Live Event <{live_event_id}>: '
+                            f'{error}\n{traceback.format_exc()}',
+                            command_type=command_type, segmentation_type_id=20, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+
+            else:
+                log('[upl-py_Err] Warning: There are no descriptors in command type 6',
+                    command_type=command_type, slicer_version=slicer_version, stream_type=stream_type)

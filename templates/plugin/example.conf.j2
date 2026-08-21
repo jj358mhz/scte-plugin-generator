@@ -1,0 +1,219 @@
+# =============================================================================
+# Uplynk LiveSlicer configuration
+# Plugin: scte_{{ plugin_name }}.py
+# Client: {{ client_name }}
+# Generated: {{ today }} by scte-plugin-generator v{{ generator_version }}
+#
+# This is a reference config. Keys are active for the presets/features you
+# selected at generation time. Everything else is emitted commented-out so
+# you can see the full surface area — uncomment to enable.
+#
+# Replace all <CHANGEME_*> placeholders before deploying.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Slicer identity & authentication
+# -----------------------------------------------------------------------------
+apikey: <CHANGEME_APIKEY>
+username: <CHANGEME_USERNAME>
+slicerID: {{ plugin_name }}_01
+description: {{ plugin_name }}_01
+
+# -----------------------------------------------------------------------------
+# API / SSL
+# -----------------------------------------------------------------------------
+api_port: 65009
+authenticated_api_port: 65209
+ssl_port: 65109
+ssl_cert: /etc/uplynk/certs/<CHANGEME>-ssl-cert.pem
+enable_remote_config: 1
+
+# -----------------------------------------------------------------------------
+# Input source (UDP multicast example — adjust for your ingest)
+# -----------------------------------------------------------------------------
+input: udp
+manual_ip: <CHANGEME_SLICER_FQDN>
+multicast: 239.0.0.1
+meta: source_multicast=239.0.0.1
+port: 1234
+pids: 2001,3001,503
+pids_optional: 4001
+
+# RTP tuning (leave defaults unless you have a reason)
+rtp_backlog_dur: 1.4
+rtp_headers: 1
+rtp_readahead_dur: 2.0
+
+# -----------------------------------------------------------------------------
+# Behavior
+# -----------------------------------------------------------------------------
+autoexpire_age: 720
+drop_expired_breaks: on
+future_break_expiration_minutes: 120
+future_timecodes: off
+no_signal_startup: yes
+start_blackout: sticky
+wallclock: 1
+debugoverlay: 0
+parse_XDS: no
+nielsen: false
+
+# -----------------------------------------------------------------------------
+# Audio
+# -----------------------------------------------------------------------------
+enable_loudnorm: yes
+target_loudness: -23
+gain: 6.0
+
+# Closed captions
+cc1_desc: English
+cc1_lang: en
+
+# -----------------------------------------------------------------------------
+# Live preview
+# -----------------------------------------------------------------------------
+preview: on
+livepreview_with_audio: yes
+livepreview_width: 320
+livepreview_height: 240
+livepreview_fps: 30
+livepreview_bitrate: 500000
+
+# -----------------------------------------------------------------------------
+# SCTE plugin loading
+# -----------------------------------------------------------------------------
+scte_type: python
+scte_module: /opt/uplynk/plugins/scte_{{ plugin_name }}.py
+scte_python_version: 3.8
+scte_log_verbosity: 2
+
+# =============================================================================
+# Channel group selection
+# =============================================================================
+# `channel_group` picks which method in the plugin handles this slicer's SCTE.
+# Exactly one channel_group must be active per slicer config.
+#
+# Available in this plugin:
+{% for m in methods -%}
+#   - {{ m.channel_group }}  ({{ m.name }})
+{% endfor -%}
+# =============================================================================
+
+{% if has_linear -%}
+channel_group: {% for m in methods if m.preset == 'linear' %}{{ m.channel_group }}{% endfor %}
+{%- elif has_live_event -%}
+channel_group: {% for m in methods if m.preset == 'live_event' %}{{ m.channel_group }}{% endfor %}
+{%- elif has_scte_logger -%}
+channel_group: {% for m in methods if m.preset == 'scte_logger' %}{{ m.channel_group }}{% endfor %}
+{%- endif %}
+
+# -----------------------------------------------------------------------------
+# Linear preset config
+# -----------------------------------------------------------------------------
+{% if has_linear %}
+# (linear preset selected — no extra config keys required beyond channel_group)
+{% else %}
+# channel_group: linear
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# Live event preset config
+# -----------------------------------------------------------------------------
+{% if has_live_event %}
+call_sign: <CHANGEME_CALLSIGN>
+event_start_extension: 0.0
+event_end_extension: 0.0
+stream_type: 1
+local_mode: 0
+passthrough_mode: 0
+outofnetwork_mode: 0
+
+# Per-type duration offsets (seconds, float)
+duration_offset_17: 0
+duration_offset_54: 0
+duration_offset_501: 0
+
+# Per-type PTS offsets (seconds, float)
+pts_offset_1: 0
+pts_offset_16: 0
+pts_offset_17: 0
+pts_offset_19: 0
+pts_offset_20: 0
+pts_offset_54: 0
+pts_offset_55: 0
+pts_offset_500: 0
+pts_offset_501: 0
+
+# Fallback slate GUID if mid-event slate GUID cannot be resolved
+midevent_slate_guid_fallback: <CHANGEME_SLATE_GUID>
+{% else %}
+# call_sign: <CHANGEME_CALLSIGN>
+# event_start_extension: 0.0
+# event_end_extension: 0.0
+# stream_type: 1
+# local_mode: 0
+# passthrough_mode: 0
+# outofnetwork_mode: 0
+# duration_offset_17: 0
+# duration_offset_54: 0
+# duration_offset_501: 0
+# pts_offset_1: 0
+# pts_offset_16: 0
+# pts_offset_17: 0
+# pts_offset_19: 0
+# pts_offset_20: 0
+# pts_offset_54: 0
+# pts_offset_55: 0
+# pts_offset_500: 0
+# pts_offset_501: 0
+# midevent_slate_guid_fallback: <CHANGEME_SLATE_GUID>
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# SCTELogger preset config
+# -----------------------------------------------------------------------------
+{% if has_scte_logger %}
+# (scte_logger preset selected — no extra config keys required beyond channel_group)
+# Increase scte_log_verbosity above if you want more detail in the slicer log.
+{% else %}
+# (scte_logger preset not selected — see scte_log_verbosity above for base logging)
+{% endif %}
+
+# =============================================================================
+# Optional features
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# Boundary handling
+# -----------------------------------------------------------------------------
+{% if 'boundary_handling' in features %}
+boundary_handling: on
+{% else %}
+# boundary_handling: on
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# EIDR routing
+# -----------------------------------------------------------------------------
+{% if 'eidr_routing' in features %}
+eidr_routing: on
+eidr_default_channel: <CHANGEME_EIDR_DEFAULT>
+{% else %}
+# eidr_routing: on
+# eidr_default_channel: <CHANGEME_EIDR_DEFAULT>
+{% endif %}
+
+# -----------------------------------------------------------------------------
+# ID3 writing
+# -----------------------------------------------------------------------------
+{% if 'id3_writing' in features %}
+id3_enable: 1
+id3_mode: 0
+{% else %}
+# id3_enable: 1
+# id3_mode: 0
+{% endif %}
+
+# =============================================================================
+# End of config
+# =============================================================================

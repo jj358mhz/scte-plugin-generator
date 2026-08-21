@@ -34,6 +34,11 @@ RUN pip install --no-cache-dir --upgrade pip \
 # --- runtime stage -----------------------------------------------------------
 FROM python:3.12-slim-bookworm AS runtime
 
+# Label anchors the auto-prune filter in .github/workflows/deploy.yml
+# (docker image prune --filter "label=app=scte-plugin-generator") so
+# cleanup only touches images from this repo, never other Pi stacks.
+LABEL app=scte-plugin-generator
+
 # Non-root user — matches the pattern from your other Utility Pi stacks and
 # avoids the container running as UID 0.
 RUN groupadd --system --gid 1000 app \

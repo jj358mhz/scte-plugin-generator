@@ -449,3 +449,293 @@ def {{ m.name }}(slice_info, slicer_id):
             else:
                 log('[upl-py_Err] Warning: There are no descriptors in command type 6',
                     command_type=command_type, slicer_version=slicer_version, stream_type=stream_type)
+
+                # ══════════════════════════════════════════════════════════════════════
+        # Command Type 5 — Splice Insert (Ad breaks: Types 54/55)
+        # ══════════════════════════════════════════════════════════════════════
+        elif command_type == 5:
+            seg_type_list = []
+            seg_id_indices = []
+            if 'descriptors' in slice_info:
+                for i, descriptor in enumerate(slice_info['descriptors']):
+                    if 'segmentation_type_id' in descriptor:
+                        seg_type_list.append(descriptor['segmentation_type_id'])
+                        seg_id_indices.append(i)
+
+                if passthrough_mode:
+                    log(f'[upl-py_Mode] Passthrough mode set to {passthrough_mode}, skip processing all '
+                        f'ad breaks', command_type=command_type, call_sign=call_sign,
+                        slicer_version=slicer_version, stream_type=stream_type)
+                else:
+                    # ──────────────────────────────────────────────────────────
+                    # Type 54 (0x36) — Distributor Placement Opportunity Start
+                    # ──────────────────────────────────────────────────────────
+                    if 54 in seg_type_list:
+                        index = seg_type_list.index(54)
+                        seg_id_index = seg_id_indices[index]
+                        base64_54 = slice_info['base64']
+                        duration = break_dur(slice_info, index)
+                        zero_dur = slice_info['descriptors'][index]['segmentation_duration']
+
+                        # Reset per-break flags
+                        BREAK_UPID_MISMATCH = False
+                        ZERO_DUR = False
+                        log(f'[upl-py_LE] From 54, resetting per-break flags — BREAK_UPID_MISMATCH: '
+                            f'<{BREAK_UPID_MISMATCH}> | ZERO_DUR: <{ZERO_DUR}>',
+                            command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+
+                        # Decode SCTE UPID
+                        try:
+                            scte_upid_bytes = slice_info['descriptors'][seg_id_index]['segmentation_upid']
+                            scte_upid = scte_upid_bytes.decode('utf-8')
+                        except (IndexError, KeyError, AttributeError, UnicodeDecodeError) as decode_err:
+                            log(f'[upl-py_Err] From 54, Could not decode break UPID: {decode_err}\n'
+                                f'{traceback.format_exc()}',
+                                command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            return
+
+                        # Fetch ExternalID
+                        try:
+                            ExternalID = EXTERNAL_ID[-1]
+                        except IndexError:
+                            log(f'[upl-py_Err] From 54, EXTERNAL_ID list is empty — no prior Type 16, skipping',
+                                command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            return
+
+                        # Classify the UPID
+                        if scte_upid == 'slate:terminal':
+                            TERMINAL_UPID = True
+                            BREAK_UPID_MISMATCH = False  # force no mismatch for terminal slates
+                            log(f'[upl-py_LE] From 54, SCTE UPID set to: <{scte_upid}>, setting the '
+                                f'TERMINAL_UPID to: <{TERMINAL_UPID}> | BREAK_UPID_MISMATCH to: '
+                                f'<{BREAK_UPID_MISMATCH}>', command_type=command_type,
+                                segmentation_type_id=54, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+
+                        elif scte_upid != ExternalID:
+                            BREAK_UPID_MISMATCH = True
+                            log(f'[upl-py_LE] From 54, SCTE UPID: <{scte_upid}> != the External ID: '
+                                f'<{ExternalID}>, setting BREAK_UPID_MISMATCH to: <{BREAK_UPID_MISMATCH}>',
+                                command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                        else:
+                            BREAK_UPID_MISMATCH = False
+                            log(f'[upl-py_LE] From 54, SCTE UPID: <{scte_upid}> == the External ID: '
+                                f'<{ExternalID}>, setting BREAK_UPID_MISMATCH to: <{BREAK_UPID_MISMATCH}>',
+                                command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+
+                        # Guard: zero duration (skip whole 54/55 pair)
+                        if zero_dur == 0:
+                            ZERO_DUR = True
+                            log(f'[upl-py_Err] From 54, setting ZERO_DUR to True — invalid duration: '
+                                f'{zero_dur} pts, skipping ad break',
+                                command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            return
+
+                        # Guard: UPID mismatch (skip whole 54/55 pair)
+                        if BREAK_UPID_MISMATCH:
+                            log(f'[upl-py_LE] From 54, BREAK_UPID_MISMATCH is: <{BREAK_UPID_MISMATCH}> — '
+                                f'invalid match between SCTE break UPID: <{scte_upid}> and the '
+                                f'external ID: <{ExternalID}>, skipping ad break',
+                                command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            return
+
+                        # Start the ad
+                        duration_offset_54 = dur_off_x(54)
+                        pts_offset_54 = pts_off_x(54)
+                        approx_duration_in_seconds = adis(duration, duration_offset_54)
+                        log(f'[upl-py_Off] From 54, duration_offset: {duration_offset_54} pts | '
+                            f'pts_offset: {pts_offset_54} pts',
+                            command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        log(f'[upl-py_Ad] From 54, Ad Start at {pts + pts_offset_54} pts for '
+                            f'{approx_duration_in_seconds} seconds',
+                            command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                            slicer_version=slicer_version, stream_type=stream_type)
+                        slicer.AdMeta('base64_54', str(base64_54, 'utf-8'))
+                        slicer.AdStart(int(pts + pts_offset_54), int(duration + duration_offset_54))
+
+                        # Terminal Break Event End Handling
+                        if TERMINAL_UPID:
+                            # None sentinel set by start_event when API failed to return event_id
+                            live_event_id = LIVE_EVENT_ID.get(ExternalID)
+                            if not live_event_id:
+                                log(f'[upl-py_Err] From 54, Terminal Ending, no valid Live Event ID for '
+                                    f'<{ExternalID}> — Type 16 start may have failed, skipping terminal end',
+                                    command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                TERMINAL_UPID = False
+                                return
+                            assert isinstance(live_event_id, str)
+                            log(f'[upl-py_LE] From 54, Terminal Ending, Live event ID: <{live_event_id}>',
+                                command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+
+                            try:
+                                terminal_duration = break_dur_terminal(slice_info, seg_id_index)
+                                end_extension = live_event_end_ext()
+                                end_time_epoch = le_epoch_end_time(terminal_duration, end_extension)
+                            except Exception as error:
+                                log(f'[upl-py_Err] From 54, Terminal Ending, could not compute end time epoch: '
+                                    f'{error}\n{traceback.format_exc()}',
+                                    command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                TERMINAL_UPID = False
+                                return
+
+                            # Inline callback: closes over command_type, call_sign, slicer_id, etc.
+                            def _terminal_event_end(event_id, _event_json):
+                                log(f'[upl-py_LE] From 54 callback, Terminal Ending of Live Event: <{event_id}>',
+                                    command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                    slicer_id=slicer_id, slicer_version=slicer_version,
+                                    stream_type=stream_type)
+                                return event_id
+
+                            try:
+                                terminal_event_end(live_event_id, end_time_epoch, _terminal_event_end)
+                            except Exception as error:
+                                log(f'[upl-py_Err] From 54, Could not schedule terminal event end for '
+                                    f'<{live_event_id}>: {error}\n{traceback.format_exc()}',
+                                    command_type=command_type, segmentation_type_id=54, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                TERMINAL_UPID = False
+                                return
+
+                    # ──────────────────────────────────────────────────────────
+                    # Type 55 (0x37) — Distributor Placement Opportunity End
+                    # ──────────────────────────────────────────────────────────
+                    if 55 in seg_type_list:
+                        index = seg_type_list.index(55)
+                        seg_id_index = seg_id_indices[index]
+
+                        # Decode SCTE UPID
+                        try:
+                            scte_upid_bytes = slice_info['descriptors'][seg_id_index]['segmentation_upid']
+                            scte_upid = scte_upid_bytes.decode('utf-8')
+                        except (IndexError, KeyError, AttributeError, UnicodeDecodeError) as decode_err:
+                            log(f'[upl-py_Err] From 55, Could not decode break UPID: {decode_err}\n'
+                                f'{traceback.format_exc()}',
+                                command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            return
+
+                        # Fetch ExternalID
+                        try:
+                            ExternalID = EXTERNAL_ID[-1]
+                        except IndexError:
+                            log(f'[upl-py_Err] From 55, EXTERNAL_ID list is empty — no prior Type 16, skipping',
+                                command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            return
+
+                        # ── Terminal slate branch ────────────────────────────
+                        if scte_upid == 'slate:terminal':
+                            TERMINAL_UPID = True
+                            BREAK_UPID_MISMATCH = False
+                            log(f'[upl-py_LE] From 55, SCTE UPID set to <{scte_upid}>. Ending the ad break and '
+                                f'triggering event_end_cancel. TERMINAL_UPID: <{TERMINAL_UPID}> | '
+                                f'BREAK_UPID_MISMATCH: <{BREAK_UPID_MISMATCH}>',
+                                command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+
+                            # None sentinel set by start_event when API failed to return event_id
+                            live_event_id = LIVE_EVENT_ID.get(ExternalID)
+                            if not live_event_id:
+                                log(f'[upl-py_Err] From 55, Terminal Ending, no valid Live Event ID for '
+                                    f'<{ExternalID}> — Type 16 start may have failed, skipping ad end and '
+                                    f'cancel',
+                                    command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                TERMINAL_UPID = False
+                                return
+                            assert isinstance(live_event_id, str)
+                            log(f'[upl-py_LE] From 55, Terminal Ending, Live event ID: <{live_event_id}>',
+                                command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+
+                            # End the ad break
+                            pts_offset_55 = pts_off_x(55)
+                            log(f'[upl-py_Ad] From 55, Ad End at {pts + pts_offset_55} pts',
+                                command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            slicer.AdEnd(int(pts + pts_offset_55))
+
+                            # Inline callback: closes over command_type, call_sign, slicer_version, stream_type
+                            def _terminal_event_end_cancel(event_id, _event_json):
+                                log(f'[upl-py_LE] From 55 callback, event_end_cancel triggered for '
+                                    f'Live Event: <{event_id}>',
+                                    command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                return event_id
+
+                            try:
+                                terminal_event_end_cancel(live_event_id, _terminal_event_end_cancel)
+                            except Exception as error:
+                                log(f'[upl-py_Err] From 55, Could not cancel terminal event end for '
+                                    f'<{live_event_id}>: {error}\n{traceback.format_exc()}',
+                                    command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                TERMINAL_UPID = False
+                                return
+
+                            TERMINAL_UPID = False  # reset for next event (successful path)
+
+                        # ── Non-terminal branch ──────────────────────────────
+                        else:
+                            # Classify the UPID
+                            if scte_upid != ExternalID:
+                                BREAK_UPID_MISMATCH = True
+                                log(f'[upl-py_LE] From 55, SCTE UPID: <{scte_upid}> != the External ID: '
+                                    f'<{ExternalID}>, setting BREAK_UPID_MISMATCH to: <{BREAK_UPID_MISMATCH}>',
+                                    command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                            else:
+                                BREAK_UPID_MISMATCH = False
+                                log(f'[upl-py_LE] From 55, SCTE UPID: <{scte_upid}> == the External ID: '
+                                    f'<{ExternalID}>, setting BREAK_UPID_MISMATCH to: <{BREAK_UPID_MISMATCH}>',
+                                    command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+
+                            # Guard: zero duration from Type 54 (skip AdEnd)
+                            if ZERO_DUR:
+                                log('[upl-py_Err] From 55, prior Type 54 had zero duration, skipping AdEnd',
+                                    command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                ZERO_DUR = False
+                                return
+
+                            # Guard: UPID mismatch (skip AdEnd)
+                            if BREAK_UPID_MISMATCH:
+                                log('[upl-py_Err] From 55, invalid match between SCTE break UPID and the '
+                                    'external ID, skipping AdEnd',
+                                    command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                    slicer_version=slicer_version, stream_type=stream_type)
+                                BREAK_UPID_MISMATCH = False
+                                return
+
+                            # Fire AdEnd
+                            pts_offset_55 = pts_off_x(55)
+                            log(f'[upl-py_Off] From 55, pts_offset set as: {pts_offset_55} pts',
+                                command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            log(f'[upl-py_Ad] From 55, Ad End at {pts + pts_offset_55} pts',
+                                command_type=command_type, segmentation_type_id=55, call_sign=call_sign,
+                                slicer_version=slicer_version, stream_type=stream_type)
+                            slicer.AdEnd(int(pts + pts_offset_55))
+
+            else:
+                log('[upl-py_Err] Warning: There are no descriptors in command type 5',
+                    command_type=command_type, slicer_version=slicer_version, stream_type=stream_type)
+
+        else:
+            log('[upl-py_Err] Unhandled SCTE command type', command_type=command_type,
+                slicer_version=slicer_version, stream_type=stream_type)
+
+    except Exception as e:
+        log(f'[upl-py_Err] Exception in Plugin method {channel_group}: {e}' + traceback.format_exc())

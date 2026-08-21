@@ -103,3 +103,49 @@ def {{ m.name }}(slice_info, slicer_id):
             log(f'[upl-py_SCTE] Command {command_type} (unhandled command type) | PTS={pts}',
                 command_type=command_type)
             return
+
+        # Descriptor loop — command_type 5 and 6 both carry descriptors when present
+        descriptors = slice_info.get('descriptors', []) or []
+        if not descriptors:
+            log(f'[upl-py_SCTE] No descriptors in command_type={command_type} | PTS={pts}',
+                command_type=command_type)
+            return
+
+        for i, descriptor in enumerate(descriptors):
+            seg_id = descriptor.get('segmentation_type_id')
+            if seg_id is None:
+                log(f'[upl-py_SCTE] descriptor[{i}] has no segmentation_type_id, skipping',
+                    command_type=command_type)
+                continue
+
+            # Look up name + duration flag
+            name, has_duration = _SCTE_LOGGER_TABLE.get(seg_id, ('Unknown', False))
+
+            # Decode UPID (graceful — some seg types carry non-UTF8 payloads)
+            upid_repr = '-'
+            upid_bytes = descriptor.get('segmentation_upid', b'')
+            if upid_bytes:
+                try:
+                    upid_repr = upid_bytes.decode('utf-8')
+                except (UnicodeDecodeError, AttributeError):
+                    # Fall back to hex representation for binary UPIDs (MPU, EIDR, etc.)
+                    try:
+                        upid_repr = f'0x{upid_bytes.hex()}'
+                    except AttributeError:
+                        upid_repr = repr(upid_bytes)
+
+            # Extract duration if this seg type carries one
+            duration_repr = '-'
+            if has_duration:
+                try:
+                    duration_pts = break_dur(slice_info, i)
+                    duration_repr = f'{adis(duration_pts, 0)}s'
+                except Exception as dur_err:
+                    duration_repr = f'(duration extract failed: {dur_err})'
+
+            log(f'[upl-py_SCTE] Type {seg_id} (0x{seg_id:02X}) {name} | '
+                f'UPID={upid_repr} | duration={duration_repr} | PTS={pts}',
+                command_type=command_type, segmentation_type_id=seg_id)
+
+    except Exception as e:
+        log(f'[upl-py_Err] Exception in Plugin method {channel_group}: {e}' + traceback.format_exc())

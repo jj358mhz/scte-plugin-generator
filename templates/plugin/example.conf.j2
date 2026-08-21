@@ -99,11 +99,11 @@ scte_log_verbosity: 2
 {% endfor -%}
 # =============================================================================
 {% if has_linear -%}
-channel_group: {% for m in methods if m.preset == 'linear' %}{{ m.channel_group }}{% endfor %}
-{%- elif has_live_event -%}
-channel_group: {% for m in methods if m.preset == 'live_event' %}{{ m.channel_group }}{% endfor %}
-{%- elif has_scte_logger -%}
-channel_group: {% for m in methods if m.preset == 'scte_logger' %}{{ m.channel_group }}{% endfor %}
+channel_group: {{ methods | selectattr('preset', 'equalto', 'linear') | map(attribute='channel_group') | first }}
+{% elif has_live_event -%}
+channel_group: {{ methods | selectattr('preset', 'equalto', 'live_event') | map(attribute='channel_group') | first }}
+{% elif has_scte_logger -%}
+channel_group: {{ methods | selectattr('preset', 'equalto', 'scte_logger') | map(attribute='channel_group') | first }}
 {% endif %}
 
 # -----------------------------------------------------------------------------

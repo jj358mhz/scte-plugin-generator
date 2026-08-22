@@ -21,6 +21,40 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.0.0] - 2026-08-22
+
+First feature-complete release. Complete G-series template set, full app zip
+expansion, repo-level docs, and post-ship housekeeping all landed.
+
+### Added
+- Repo-level `CLAUDE.md` guidance for AI assistants (see `0.5.1` entry).
+
+### Changed
+- Bumped to `1.0.0` — G-series complete, zip expansion complete, cleanup pass
+  complete. Bump policy met the MAJOR criterion.
+
+### Fixed
+- Broken TOC anchors in repo `README.md` — the 🎛️ and 🏗️ emojis contain
+  variation selectors (U+FE0F) that GitHub's slugifier preserves in the
+  anchor. TOC entries had been pointing at selector-stripped slugs and
+  404'ing.
+
+### Removed
+- **`_log_helpers.py.j2`** template. The file was a rename artifact from S3 —
+  intended as a home for helpers used by `log()`, but never grew helpers worth
+  extracting. Its actual contents (an old SCTELogger implementation and
+  duplicate `_SCTE_SEG_TYPES` seg-type table) were dead code because
+  `_method_scte_logger.py.j2` redefines `SCTELogger` later in the include
+  order. Removed the file and its include line from `scte_plugin.py.j2`. If
+  `log()` ever grows helpers worth extracting, the file can be recreated in
+  a two-minute change.
+- **Vestigial live_event async helpers** from `scte_plugin.py.j2` Section 4:
+  `_type16_callback`, `_terminal_update_cb`, `_start_event_cb`,
+  `_TYPE16_PTS_CACHE`. Never called — `_method_live_event.py.j2` supersedes
+  them with inline closures that capture per-event state (`external_id`,
+  `pts`, `pts_offset`, `id3_mode`, `call_sign`, etc.) directly, which the
+  module-level versions couldn't do cleanly.
+
 ## [0.5.0] - 2026-08-21
 
 ### Added

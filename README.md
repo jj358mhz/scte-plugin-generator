@@ -1,5 +1,7 @@
 # 📺 scte-plugin-generator
 
+[![Release](https://img.shields.io/github/v/release/jj358mhz/scte-plugin-generator?label=release&color=ec1e79)](https://github.com/jj358mhz/scte-plugin-generator/releases/latest)
+
 🏭 A Flask + Jinja2 web app that generates hardened SCTE-35 plugin scaffolds for the [Uplynk LiveSlicer](https://www.uplynk.com/) from a web form.
 
 - 🌐 **Deployed:** [plugin.telcomjj.com](https://plugin.telcomjj.com) (LAN-only)

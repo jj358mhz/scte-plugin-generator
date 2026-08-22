@@ -21,6 +21,39 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.0.3] - 2026-08-22
+
+### Changed
+- Alphabetized imports in `scte_plugin.py.j2` with PEP 8 stdlib/third-party
+  grouping. `# stdlib` and `# third-party` comment headers, blank line
+  between groups, alpha within each group. Conditional imports keep their
+  Jinja gates but sort into their alpha position. isort- and ruff-friendly.
+
+## [1.0.2] - 2026-08-22
+
+### Added
+- New "Release gotchas" section in `CLAUDE.md`: tag-vs-release distinction,
+  Camo image cache behavior, emoji variation selectors in header anchors,
+  `git add` no-op on clean files. Captures workflow gotchas from S4 that
+  would otherwise recur.
+- New "Never do" rule in `CLAUDE.md` against creating placeholder template
+  files "reserved for future use." Closes the loop on the
+  `_log_helpers.py.j2` mistake.
+
+## [1.0.1] - 2026-08-22
+
+### Added
+- Release badge in repo `README.md` — auto-tracks latest `v*` GitHub
+  release via shields.io. Uses Uplynk magenta (`#ec1e79`).
+
+### Fixed
+- Broken TOC anchors in repo `README.md` — the 🎛️ and 🏗️ emojis contain
+  variation selectors (U+FE0F) that GitHub's slugifier preserves in the
+  anchor. TOC entries had been pointing at selector-stripped slugs and
+  404'ing.
+- Restored `[1.0.0]` CHANGELOG entry that was accidentally clobbered
+  between tagging `v1.0.0` and pushing the release-badge commit.
+
 ## [1.0.0] - 2026-08-22
 
 First feature-complete release. Complete G-series template set, full app zip

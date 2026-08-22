@@ -21,6 +21,13 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.1.2] - 2026-08-22
+
+### Added
+- Documented Mac-vs-Pi dev/deploy split in `CLAUDE.md` release gotchas
+  section. Captures BSD vs GNU sed syntax differences, path layout
+  differences, and force-push recovery procedure on the Pi.
+
 ## [1.1.1] - 2026-08-22
 
 ### Added

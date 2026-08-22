@@ -86,6 +86,12 @@ scte_type: python
 scte_module: /opt/uplynk/plugins/scte_{{ plugin_name }}.py
 scte_python_version: 3.8
 scte_log_verbosity: 2
+plugin_memory_logging: false
+# allow_scte_wakeup: false
+
+# Diagnostic-only — not user-configurable; injected by the Uplynk runtime
+# profile: <runtime-injected>
+# signal_type: <runtime-injected>
 
 # =============================================================================
 # Channel group selection
@@ -110,9 +116,21 @@ channel_group: {{ methods | selectattr('preset', 'equalto', 'scte_logger') | map
 # Linear preset config
 # -----------------------------------------------------------------------------
 {% if has_linear %}
-# (linear preset selected — no extra config keys required beyond channel_group)
+outofnetwork_mode: 0
+local_mode: national
+passthrough_mode: 0
+program_start_via_scte_mode: 1
+scte_ad_break_mode: splice_insert
+ad_skip_spliceinsert: 0
+ad_skip_timesignal: 0
 {% else %}
-# channel_group: linear
+# outofnetwork_mode: 0
+# local_mode: national
+# passthrough_mode: 0
+# program_start_via_scte_mode: 1
+# scte_ad_break_mode: splice_insert
+# ad_skip_spliceinsert: 0
+# ad_skip_timesignal: 0
 {% endif %}
 
 # -----------------------------------------------------------------------------
@@ -123,9 +141,6 @@ call_sign: <CHANGEME_CALLSIGN>
 event_start_extension: 0.0
 event_end_extension: 0.0
 stream_type: 1
-local_mode: 0
-passthrough_mode: 0
-outofnetwork_mode: 0
 
 # Per-type duration offsets (seconds, float)
 duration_offset_17: 0
@@ -150,9 +165,6 @@ midevent_slate_guid_fallback: <CHANGEME_SLATE_GUID>
 # event_start_extension: 0.0
 # event_end_extension: 0.0
 # stream_type: 1
-# local_mode: 0
-# passthrough_mode: 0
-# outofnetwork_mode: 0
 # duration_offset_17: 0
 # duration_offset_54: 0
 # duration_offset_501: 0
@@ -187,8 +199,16 @@ midevent_slate_guid_fallback: <CHANGEME_SLATE_GUID>
 # -----------------------------------------------------------------------------
 {% if 'boundary_handling' in features %}
 boundary_handling: on
+boundary_name_local: local
+boundary_name_national: national
+boundary_name_oon: oon
+boundary_duration_max: 0
 {% else %}
 # boundary_handling: on
+# boundary_name_local: local
+# boundary_name_national: national
+# boundary_name_oon: oon
+# boundary_duration_max: 0
 {% endif %}
 
 # -----------------------------------------------------------------------------

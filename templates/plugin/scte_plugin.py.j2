@@ -506,12 +506,12 @@ def stream_type_id(stream_type=None):
 # -----------------------------------------------------------------------------
 
 def boundary_mode(use_boundary=None):
-    """Parse use_boundary + per-source names. Populates BOUNDARY_MODE dict."""
+    """Parse boundary_handling + per-source names. Populates BOUNDARY_MODE dict."""
     global BOUNDARY_MODE
     if use_boundary in BOUNDARY_MODE:
         return BOUNDARY_MODE[use_boundary]
     try:
-        raw = SLICER_CONFIG_DICT.get('use_boundary', False)
+        raw = SLICER_CONFIG_DICT.get('boundary_handling', False)
         value = _parse_bool_config(raw, default=False)
         BOUNDARY_MODE[use_boundary] = value
         BOUNDARY_MODE['boundary_name_oon']      = SLICER_CONFIG_DICT.get('boundary_name_oon', '-')

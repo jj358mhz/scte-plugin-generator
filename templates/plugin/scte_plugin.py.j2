@@ -30,25 +30,26 @@ Generated: {{ today }}
 Handles SCTE-35 signaling for {{ client_name }} on the Uplynk LiveSlicer platform.
 """
 
+# stdlib
+{% if 'id3_writing' in features %}
+import base64
+{% endif %}
 import inspect
+{% if has_live_event %}
+import json
+{% endif %}
 import os
 import resource
 import socket
 import time
 import traceback
 {% if has_live_event %}
-import json
-{% endif %}
-{% if 'id3_writing' in features %}
-import base64
-{% endif %}
-
-import requests
-import slicer
-
-{% if has_live_event %}
 from typing import Callable
 {% endif %}
+
+# third-party
+import requests
+import slicer
 
 # -----------------------------------------------------------------------------
 # Version

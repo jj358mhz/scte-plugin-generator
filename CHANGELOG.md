@@ -21,6 +21,13 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.1.1] - 2026-08-22
+
+### Added
+- 🔌 favicon on the generator UI (`plugin.telcomjj.com`). Inline SVG data
+  URI in `form.html` `<head>` — no assets, no build step, emoji renders
+  as the browser tab icon across all modern browsers.
+
 ## [1.1.0] - 2026-08-21
 
 ### Fixed

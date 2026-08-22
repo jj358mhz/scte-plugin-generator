@@ -38,6 +38,15 @@ Every generated file carries `{{ generator_version }}` in its footer so users ca
 - **When updating `app.py`'s `generate()` route to emit a new file, always do both the render AND the writestr in the same commit.** Shipping a template without wiring it up produces a silent regression.
 - **Pi git config gotcha:** if a deploy fails with `fatal: Cannot rebase onto multiple branches`, the Pi needs `git config pull.rebase false && git config pull.ff only` in the repo. Already applied on the current Pi; document it if a new Pi is ever provisioned.
 
+## Release gotchas
+
+Things that bit past sessions, kept here so they don't bite the next one:
+
+- **Tags vs releases.** `git push origin v1.0.1` pushes a tag. GitHub's release badge (shields.io) only sees *releases*, not tags. Create the release with `gh release create <tag> --title "..." --notes-from-tag` or via the web UI at `/releases`.
+- **Camo image cache.** `camo.githubusercontent.com` caches badge/image URLs. If a badge stays stale after the underlying data has changed, either wait (usually clears in a few minutes) or bust it by appending a nonsense query param like `&v=2` to the badge URL and committing.
+- **Emoji variation selectors in header anchors.** Emojis with variation selectors (🎛️ = U+1F39B U+FE0F, 🏗️ = U+1F3D7 U+FE0F) produce anchor slugs that include the selector — e.g. `## 🎛️ Available features` becomes `#️-available-features`, not `#-available-features`. Copy the slug GitHub actually generates rather than guessing.
+- **`git add <file>` only stages files with unstaged modifications.** If a file was edited then reverted between the edit and the `git add`, or if a prior `git commit` already picked up the change, `git add` is a no-op and produces no warning. Watch commit output for unexpectedly low `N file(s) changed` counts.
+
 ## Parked work
 
 - **OON preset** — scaffolding kept dormant in `scte_plugin.py.j2` (all gated by `{% if has_oon %}`, which is hardcoded `False`). Revival steps documented in the S3 handoff. Do not remove the dormant scaffolding without user confirmation.
@@ -47,6 +56,7 @@ Every generated file carries `{{ generator_version }}` in its footer so users ca
 - Never rename or delete a template file without explicit user confirmation — the file rename cheat sheet in S3 handoff exists because of a prior rename that confused things for a session.
 - Never commit `GENERATOR_VERSION` bumps without a corresponding CHANGELOG.md entry at the repo root.
 - Never edit files under `/mnt/user-data/uploads` or other read-only mounts — those are user artifacts, not the working repo.
+- Never create empty template files as placeholders "reserved for future use." Only create a template file when there's actual content to put in it. Empty scaffolding gets included in every generated plugin as dead code and creates confusion the next time someone looks at the file wondering why it exists. Adding a template later is a two-minute change; removing accumulated placeholder cruft is a whole-session chore.
 
 ## When in doubt
 

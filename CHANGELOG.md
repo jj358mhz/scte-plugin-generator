@@ -21,6 +21,31 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.1.0] - 2026-08-21
+
+### Fixed
+- `example.conf.j2`: added `plugin_memory_logging: false` — was read by
+  `Process35()` on every invocation but never surfaced in the generated conf.
+- `example.conf.j2`: added `allow_scte_wakeup: false` as a commented-out
+  user-tunable key (gates whether Type 16 can pull the slicer out of
+  blackout). Previously buried in the wrong comment block.
+- `example.conf.j2`: `boundary_handling` feature block now emits all four
+  sub-keys (`boundary_name_local`, `boundary_name_national`,
+  `boundary_name_oon`, `boundary_duration_max`) — all were missing.
+- `scte_plugin.py.j2`: `boundary_mode()` was reading `use_boundary` from
+  config but the conf key was always `boundary_handling`. Parser and conf
+  now agree.
+- `example.conf.j2`: linear preset block now emits `outofnetwork_mode`,
+  `local_mode`, `passthrough_mode`, `program_start_via_scte_mode`,
+  `scte_ad_break_mode`, `ad_skip_spliceinsert`, `ad_skip_timesignal` — all
+  were read by linear parsers but absent from the generated conf.
+- `example.conf.j2`: removed duplicate `local_mode`, `passthrough_mode`,
+  `outofnetwork_mode` from the live event block (conflict with linear block;
+  live event block's `local_mode: 0` was also semantically wrong — the key
+  is a tri-state string, not a boolean).
+- `example.conf.j2`: runtime-injected keys (`profile`, `signal_type`)
+  correctly labeled as non-user-configurable in a separate comment block.
+
 ## [1.0.3] - 2026-08-22
 
 ### Changed

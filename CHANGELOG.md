@@ -24,9 +24,10 @@ Version bump policy:
 ## [1.0.0] - 2026-08-22
 
 First feature-complete release. Complete G-series template set, full app zip
-expansion, repo-level docs, and post-ship housekeeping all landed.
+expansion, repo-level docs, post-ship housekeeping, and release badge all landed.
 
 ### Added
+- Release badge in repo `README.md` — auto-tracks latest `v*` tag.
 - Repo-level `CLAUDE.md` guidance for AI assistants (see `0.5.1` entry).
 
 ### Changed

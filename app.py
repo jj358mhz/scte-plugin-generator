@@ -17,7 +17,7 @@ from typing import Any
 from flask import Flask, render_template, request, send_file, abort
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-GENERATOR_VERSION = '0.4.2'  # bump on meaningful generator changes
+GENERATOR_VERSION = '0.4.3'  # bump on meaningful generator changes
 
 app = Flask(__name__)
 

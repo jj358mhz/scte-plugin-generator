@@ -58,24 +58,24 @@ This build ships with the following presets and features:
 
 1. 📤 Copy `scte_{{ plugin_name }}.py` to the slicer's plugin directory:
 
-~~bash
+```bash
 scp scte_{{ plugin_name }}.py user@slicer:/opt/uplynk/plugins/
-~~
+```
 
 2. 🔐 Set permissions:
 
-~~bash
+```bash
 ssh user@slicer 'chmod 644 /opt/uplynk/plugins/scte_{{ plugin_name }}.py'
-~~
+```
 
 3. 📝 Place `uplynk.conf` at the slicer's config path (typically `/etc/uplynk/uplynk.conf`).
    Edit it first — see [⚙️ Configuration](#️-configuration).
 
 4. 🔄 Restart the slicer service so it picks up the new plugin and config:
 
-~~bash
+```bash
 ssh user@slicer 'sudo systemctl restart uplynk-slicer'
-~~
+```
 
 ## ⚙️ Configuration
 
@@ -197,9 +197,9 @@ _🚫 No optional features enabled in this build._
 
 After restarting the slicer, 📜 tail its log:
 
-~~bash
+```bash
 ssh user@slicer 'sudo journalctl -u uplynk-slicer -f'
-~~
+```
 
 You should see plugin-load banner lines including:
 
@@ -245,7 +245,7 @@ The hex is the raw payload; decode it upstream if you need a semantic value.
 
 The generated plugin file is organized into 5 sections plus entrypoints:
 
-~~text
+```text
 scte_{{ plugin_name }}.py
 ├── 📥 Section 1: Imports and module constants
 ├── 🌐 Section 2: Global state
@@ -269,7 +269,7 @@ scte_{{ plugin_name }}.py
 └── 🚪 Entrypoints
     ├── Process35(scte_message, ...)  # main SCTE dispatcher, loops methods
     └── HandleCall(...)                # async callback dispatcher
-~~
+```
 
 🔁 The `Process35` dispatcher is loop-driven: it iterates registered methods
 and calls whichever one matches the slicer's `channel_group`. Adding a

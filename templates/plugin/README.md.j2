@@ -58,24 +58,24 @@ This build ships with the following presets and features:
 
 1. 📤 Copy `scte_{{ plugin_name }}.py` to the slicer's plugin directory:
 
-```bash
-   scp scte_{{ plugin_name }}.py user@slicer:/opt/uplynk/plugins/
-```
+~~bash
+scp scte_{{ plugin_name }}.py user@slicer:/opt/uplynk/plugins/
+~~
 
 2. 🔐 Set permissions:
 
-```bash
-   ssh user@slicer 'chmod 644 /opt/uplynk/plugins/scte_{{ plugin_name }}.py'
-```
+~~bash
+ssh user@slicer 'chmod 644 /opt/uplynk/plugins/scte_{{ plugin_name }}.py'
+~~
 
 3. 📝 Place `uplynk.conf` at the slicer's config path (typically `/etc/uplynk/uplynk.conf`).
    Edit it first — see [⚙️ Configuration](#️-configuration).
 
 4. 🔄 Restart the slicer service so it picks up the new plugin and config:
 
-```bash
-   ssh user@slicer 'sudo systemctl restart uplynk-slicer'
-```
+~~bash
+ssh user@slicer 'sudo systemctl restart uplynk-slicer'
+~~
 
 ## ⚙️ Configuration
 
@@ -197,9 +197,9 @@ _🚫 No optional features enabled in this build._
 
 After restarting the slicer, 📜 tail its log:
 
-```bash
+~~bash
 ssh user@slicer 'sudo journalctl -u uplynk-slicer -f'
-```
+~~
 
 You should see plugin-load banner lines including:
 
@@ -245,29 +245,31 @@ The hex is the raw payload; decode it upstream if you need a semantic value.
 
 The generated plugin file is organized into 5 sections plus entrypoints:
 
+~~text
 scte_{{ plugin_name }}.py
 ├── 📥 Section 1: Imports and module constants
 ├── 🌐 Section 2: Global state
-│ ├── PLUGIN_STATE, PLUGIN_STATE_LASTMOD (dormant unless OON preset revived)
-│ ├── PENDING_CALLS (dormant unless OON preset revived)
-│ └── AD_META_KEYS, API_URL, UAC_MODE (dormant unless OON preset revived)
+│   ├── PLUGIN_STATE, PLUGIN_STATE_LASTMOD (dormant unless OON preset revived)
+│   ├── PENDING_CALLS (dormant unless OON preset revived)
+│   └── AD_META_KEYS, API_URL, UAC_MODE (dormant unless OON preset revived)
 ├── ⚙️ Section 3: Config parsing helpers
-│ ├── _parse_bool_config(), _parse_int_config(), _parse_float_config()
-│ ├── call_sign(), api_url(), ad_meta_keys(), meta_key(), uac_mode()
-│ └── Leak-safe scte_message summary builder
+│   ├── _parse_bool_config(), _parse_int_config(), _parse_float_config()
+│   ├── call_sign(), api_url(), ad_meta_keys(), meta_key(), uac_mode()
+│   └── Leak-safe scte_message summary builder
 ├── 📜 Section 4: Helpers used by log()
-│ ├── HOST / PROC_ID discovery
-│ ├── Frame introspection (caller filename + line number)
-│ ├── Uppercase log level normalization
-│ └── Redacted apikey copy for log output
+│   ├── HOST / PROC_ID discovery
+│   ├── Frame introspection (caller filename + line number)
+│   ├── Uppercase log level normalization
+│   └── Redacted apikey copy for log output
 ├── 🎬 Section 5: Method implementations
 {% for m in methods %}
-│ ├── {{ m.name }}() # channel_group={{ m.channel_group }}
+│   ├── {{ m.name }}()  # channel_group={{ m.channel_group }}
 {% endfor %}
-│ └── (dispatched from Process35)
+│   └── (dispatched from Process35)
 └── 🚪 Entrypoints
-├── Process35(scte_message, ...) # main SCTE dispatcher, loops methods
-└── HandleCall(...) # async callback dispatcher
+    ├── Process35(scte_message, ...)  # main SCTE dispatcher, loops methods
+    └── HandleCall(...)                # async callback dispatcher
+~~
 
 🔁 The `Process35` dispatcher is loop-driven: it iterates registered methods
 and calls whichever one matches the slicer's `channel_group`. Adding a

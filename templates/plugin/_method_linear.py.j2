@@ -258,6 +258,14 @@ def {{ m.name }}(slice_info, slicer_id):
 
         # =================================================================
         # command_type=5 — splice_insert with OON indicator
+        #
+        # Dispatch on OON first (what to do: start vs end), then on
+        # duration_flag inside OON=1 (how to start: closed vs open-ended).
+        # Boundary and ad-break calls never mix within a channel: under
+        # use_boundary=True everything routes to StartBoundary/EndBoundary;
+        # under use_boundary=False everything routes to AdStart/AdEnd. Open-
+        # ended OON=1 has no duration to bound, so under use_boundary=True
+        # it is refused with a warning rather than cross-paired.
         # =================================================================
         elif command_type == 5:
             if passthrough_mode:
@@ -281,16 +289,75 @@ def {{ m.name }}(slice_info, slicer_id):
                     stream_type=stream_type)
             else:
                 command = slice_info.get('command', {})
-                oon = command.get('out_of_network_indicator', 0)
-                log(f'[upl-py_Meta] OON state: {oon}',
+                oon = command.get('out_of_network_indicator')
+                duration_flag = command.get('duration_flag', 0)
+                log(f'[upl-py_Meta] OON state: {oon}, duration_flag: {duration_flag}',
                     command_type=command_type, oon=oon)
 
-                if 'duration' in command:
-                    if command['duration'] != 0:
-                        duration = break_dur_oon(slice_info)
-                        if oon == 1:
+                # -----------------------------------------------------------
+                # OON=1 — Out of Network (ad break start)
+                # -----------------------------------------------------------
+                if oon == 1:
+                    pts_offset = pts_off_x(501)
+                    base64_oon1 = slice_info.get('base64')
+                    base64_oon1_str = str(base64_oon1, 'utf-8') if base64_oon1 else ''
+
+                    if duration_flag == 0:
+                        # Open-ended break — no duration; mating OON=0 closes it.
+                        log(f'[upl-py_Off] From OON=1, duration_flag=0, '
+                            f'pts_offset set as: {pts_offset} pts',
+                            command_type=command_type, oon=1,
+                            call_sign=call_sign, slicer_version=slicer_version,
+                            stream_type=stream_type)
+{% if 'boundary_handling' in features %}
+                        if use_boundary:
+                            # Boundary mode requires a known duration to emit a
+                            # synchronous StartBoundary/EndBoundary pair. Open-
+                            # ended OON=1 cannot be bounded — refuse rather than
+                            # cross-pair with a raw AdStart that would later be
+                            # closed by EndBoundary on OON=0.
+                            log(f'[upl-py_Err] From OON=1, duration_flag=0 but '
+                                f'boundary mode requires a known duration — '
+                                f'open-ended break cannot be bounded, skipping. '
+                                f'Check config/signal alignment.',
+                                command_type=command_type, oon=1,
+                                call_sign=call_sign, slicer_version=slicer_version,
+                                stream_type=stream_type)
+                        else:
+                            log(f'[upl-py_Ad] From OON=1, No SCTE duration sent, '
+                                f'Affiliate Pod Start at {pts + pts_offset} pts '
+                                f'(open-ended, awaits mating OON=0)',
+                                command_type=command_type, oon=1,
+                                call_sign=call_sign, slicer_version=slicer_version,
+                                stream_type=stream_type)
+                            slicer.AdMeta('base64_oon1', base64_oon1_str)
+                            slicer.AdStart(int(pts + pts_offset))
+{% else %}
+                        log(f'[upl-py_Ad] From OON=1, No SCTE duration sent, '
+                            f'Affiliate Pod Start at {pts + pts_offset} pts '
+                            f'(open-ended, awaits mating OON=0)',
+                            command_type=command_type, oon=1,
+                            call_sign=call_sign, slicer_version=slicer_version,
+                            stream_type=stream_type)
+                        slicer.AdMeta('base64_oon1', base64_oon1_str)
+                        slicer.AdStart(int(pts + pts_offset))
+{% endif %}
+                    else:
+                        # duration_flag=1 — sender claims a duration is present.
+                        # Guard against duration=0: AdStart(pts, 0) disables the
+                        # slicer's auto-return timer and can trap the slicer
+                        # in-break if the mating OON=0 is lost.
+                        raw_duration = command.get('duration', 0)
+                        if raw_duration == 0:
+                            log(f'[upl-py_Err] From OON=1, duration_flag=1 but '
+                                f'duration=0 — refusing to call AdStart(pts, 0) '
+                                f'which would disable auto-return timer. Skipping.',
+                                command_type=command_type, oon=1,
+                                call_sign=call_sign, slicer_version=slicer_version,
+                                stream_type=stream_type)
+                        else:
+                            duration = break_dur_oon(slice_info)
                             duration_offset = dur_off_x(501)
-                            pts_offset = pts_off_x(501)
                             approx_duration_in_seconds = adis(duration, duration_offset)
                             log(f'[upl-py_Off] From OON=1, duration_offset set as: '
                                 f'{duration_offset} pts | pts_offset set as: {pts_offset} pts',
@@ -333,9 +400,7 @@ def {{ m.name }}(slice_info, slicer_id):
                                     command_type=command_type, oon=1,
                                     call_sign=call_sign, slicer_version=slicer_version,
                                     stream_type=stream_type)
-                                base64_oon1 = slice_info.get('base64')
-                                slicer.AdMeta('base64_oon1',
-                                              str(base64_oon1, 'utf-8') if base64_oon1 else '')
+                                slicer.AdMeta('base64_oon1', base64_oon1_str)
                                 slicer.AdStart(int(pts + pts_offset),
                                                int(duration + duration_offset))
 {% else %}
@@ -344,26 +409,15 @@ def {{ m.name }}(slice_info, slicer_id):
                                 command_type=command_type, oon=1,
                                 call_sign=call_sign, slicer_version=slicer_version,
                                 stream_type=stream_type)
-                            base64_oon1 = slice_info.get('base64')
-                            slicer.AdMeta('base64_oon1',
-                                          str(base64_oon1, 'utf-8') if base64_oon1 else '')
+                            slicer.AdMeta('base64_oon1', base64_oon1_str)
                             slicer.AdStart(int(pts + pts_offset),
                                            int(duration + duration_offset))
 {% endif %}
-                        else:
-                            log(f'[upl-py_Ad] OON={oon} (in-network), no boundary/ad '
-                                f'action taken, skipping break',
-                                command_type=command_type, oon=oon,
-                                call_sign=call_sign, slicer_version=slicer_version,
-                                stream_type=stream_type)
-                    else:
-                        log('[upl-py_Ad] Zero-duration break received (duration=0), '
-                            'skipping break',
-                            command_type=command_type, oon=oon,
-                            call_sign=call_sign, slicer_version=slicer_version,
-                            stream_type=stream_type)
-                else:
-                    # OON=0 — return to network, AdEnd
+
+                # -----------------------------------------------------------
+                # OON=0 — In Network (ad break end / return to network)
+                # -----------------------------------------------------------
+                elif oon == 0:
                     pts_offset = pts_off_x(500)
                     log(f'[upl-py_Off] OON=0 pts_offset={pts_offset} pts',
                         command_type=command_type, oon=0,
@@ -381,6 +435,17 @@ def {{ m.name }}(slice_info, slicer_id):
                         slicer.AdEnd(int(pts + pts_offset))
 {% else %}
                     slicer.AdEnd(int(pts + pts_offset))
+{% endif %}
+
+                # -----------------------------------------------------------
+                # Unexpected OON value (field missing, or non-0/1)
+                # -----------------------------------------------------------
+                else:
+                    log(f'[upl-py_Err] Warning: unexpected out_of_network_indicator '
+                        f'value: {oon}, taking no action',
+                        command_type=command_type, oon=oon,
+                        call_sign=call_sign, slicer_version=slicer_version,
+                        stream_type=stream_type)
 {% endif %}
 
         else:

@@ -21,6 +21,29 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.3.0] — 2026-09-03
+
+### Fixed
+- **Linear preset, Type 5 (splice_insert) dispatch rewritten to OON-first.** The previous dispatch branched on `'duration' in command` and `duration != 0` before OON, which silently misrouted three cases:
+  - **OON=1 with `duration_flag=0`** (open-ended affiliate pod start, e.g. CBS-style) fell into the zero-duration skip branch. `AdStart` never fired. Any correct ad-break behavior on affected channels was coming from outside the plugin (slicer's own SCTE processing, upstream ad server, or base64 metadata routing).
+  - **OON=0 with `duration_flag=0`** (return-to-network with no duration) hit the same skip path. `AdEnd` never fired.
+  - **OON=0 with a duration present** hit the `oon == 1` branch's `else` and logged "in-network, no action, skipping." `AdEnd` never fired.
+
+  New dispatch:
+  - `oon == 1` + `duration_flag == 0` → one-arg `slicer.AdStart(pts)` (open-ended; mating OON=0 closes)
+  - `oon == 1` + `duration_flag == 1` → two-arg `slicer.AdStart(pts, duration)` (unchanged behavior for the previously-working path)
+  - `oon == 0` → `slicer.AdEnd(pts)`
+  - unexpected/missing OON → warning log, no action
+
+### Changed
+- **Type 5 open-ended `AdStart` uses one-arg form** per Uplynk slicer API (`slicer.AdStart(int(pts))`, `Duration` omitted). Documented at https://docs.uplynk.com/docs/scte-plugin-slicer-module#adstart.
+- **Type 5 `out_of_network_indicator` no longer defaults to 0** on missing field. Messages arriving without the OON field now log a warning and take no action, rather than silently firing `AdEnd`.
+- **Type 5 with `duration_flag=1` but `duration=0`** now refuses to call `AdStart(pts, 0)` and logs an error. Calling `AdStart` with duration=0 disables the slicer's auto-return timer and can trap the slicer in-break if the mating OON=0 is lost — same defensive posture already applied to Type 6 zero-duration STARTs in `_handle_time_signal_ad_breaks`.
+- **`boundary_handling` + open-ended OON=1** (duration_flag=0) now logs a warning and skips. Boundary mode emits a synchronous StartBoundary/EndBoundary pair and requires a known duration; open-ended breaks cannot be bounded. Boundary and ad-break calls do not mix within a channel — under `use_boundary=True`, everything routes to `StartBoundary`/`EndBoundary`; under `use_boundary=False`, everything routes to `AdStart`/`AdEnd`.
+
+### Migration notes
+Any customer running `linear` + `splice_insert` who was seeing missed `AdStart`/`AdEnd` events will now see them fire correctly. **If you built a workaround to compensate for the silent misrouting** (upstream ad-server calls, slicer-side SCTE handling, base64 metadata routing that duplicates what the plugin now does), remove it before regenerating — otherwise you may see double-firing on affected breaks.
+
 ## [1.2.1] — 2026-09-03
 
 ### Fixed

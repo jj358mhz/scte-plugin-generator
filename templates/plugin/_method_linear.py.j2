@@ -234,7 +234,7 @@ def {{ m.name }}(slice_info, slicer_id):
                     stream_type=stream_type)
             elif ad_mode != 'time_signal':
                 ad_break_ids_seen = [s for s in seg_type_list
-                                     if s in (32, 33, 34, 35, 48, 49, 54, 55)]
+                                     if s in (32, 33, 34, 35, 48, 49, 50, 51, 54, 55)]
                 if ad_break_ids_seen:
                     log(f'[upl-py_Mode] ad_break_mode={ad_mode}, observed but '
                         f'ignoring Type 6 ad-break seg_ids: {ad_break_ids_seen}',

@@ -62,7 +62,7 @@ Uplynk's LiveSlicer accepts a Python plugin to handle SCTE-35 signaling — the 
 ## 🎬 Available presets
 
 ### 📺 `linear`
-Standard linear ad-insertion. Fires ad-break start/end on configurable SCTE-35 segmentation descriptor pairs (34/35, 48/49, 54/55 by default). Use for standard commercial broadcast feeds.
+Standard linear ad-insertion. Fires ad-break start/end on configurable SCTE-35 segmentation descriptor pairs (34/35, 48/49, 54/55 by default; 32/33 and 50/51 available opt-in). Use for standard commercial broadcast feeds.
 
 ### 🎥 `live_event`
 Disney-style live event lifecycle. Handles program start/end, mid-event slate breakaways and resumes, and provider placement opportunities. Types 0/16/17/19/20/54/55. Use for live sports, awards shows, or any feed where program boundaries matter more than fixed ad breaks.

@@ -340,6 +340,8 @@ or `time_signal` with a segmentation descriptor (command_type 6).
 | `0x23` | 35 | 🎞️ Break End |
 | `0x30` | 48 | 📣 Provider Advertisement Start |
 | `0x31` | 49 | 🔚 Provider Advertisement End |
+| `0x32` | 50 | 📣 Distributor Advertisement Start |
+| `0x33` | 51 | 🔚 Distributor Advertisement End |
 | `0x34` | 52 | 🎯 Provider Placement Opportunity Start |
 | `0x35` | 53 | 🏁 Provider Placement Opportunity End |
 | `0x36` | 54 | 📡 Distributor Placement Opportunity Start |
@@ -349,11 +351,12 @@ or `time_signal` with a segmentation descriptor (command_type 6).
 | `0x50` | 80 | 🌐 Network Start |
 | `0x51` | 81 | 🔌 Network End |
 
-🔗 Start/end type_ids come in pairs (34/35, 48/49, 54/55, etc.) — a `Start`
+🔗 Start/end type_ids come in pairs (34/35, 48/49, 50/51, 54/55, etc.) — a `Start`
 means "an event is beginning at this PTS", the matching `End` means
-"it's over". Some workflows use `Provider` types (0x30/0x31) for ads
-inserted by the network; others use `Distributor` types (0x36/0x37) for
-ads inserted by the affiliate.
+"it's over". `Provider` types (0x30/0x31) are ads inserted by the network;
+`Distributor` types (0x32/0x33) are ads inserted by the affiliate. The
+`Placement Opportunity` types (0x34/0x35, 0x36/0x37) mark break *windows*
+that can hold multiple ads, not individual spots.
 
 ## 🆔 UPIDs
 

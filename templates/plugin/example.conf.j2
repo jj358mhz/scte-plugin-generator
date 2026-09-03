@@ -123,6 +123,24 @@ program_start_via_scte_mode: 1
 scte_ad_break_mode: splice_insert
 ad_skip_spliceinsert: 0
 ad_skip_timesignal: 0
+
+# Program-start timing (Type 16)
+pts_offset_16: 0
+
+# Per-pair timing offsets (seconds, float) — one set per selected seg pair
+{% for m in methods if m.preset == 'linear' %}
+{% for pair in m.seg_id_pairs %}
+# {{ pair[2] }} — Type {{ pair[0] }}/{{ pair[1] }}
+pts_offset_{{ pair[0] }}: 0
+pts_offset_{{ pair[1] }}: 0
+duration_offset_{{ pair[0] }}: 0
+{% endfor %}
+{% endfor %}
+
+# splice_insert (Type 5) OON timing — 500=return-to-network, 501=out-of-network
+pts_offset_500: 0
+pts_offset_501: 0
+duration_offset_501: 0
 {% else %}
 # outofnetwork_mode: 0
 # local_mode: national
@@ -131,6 +149,19 @@ ad_skip_timesignal: 0
 # scte_ad_break_mode: splice_insert
 # ad_skip_spliceinsert: 0
 # ad_skip_timesignal: 0
+# pts_offset_16: 0
+# pts_offset_34: 0
+# pts_offset_35: 0
+# duration_offset_34: 0
+# pts_offset_48: 0
+# pts_offset_49: 0
+# duration_offset_48: 0
+# pts_offset_54: 0
+# pts_offset_55: 0
+# duration_offset_54: 0
+# pts_offset_500: 0
+# pts_offset_501: 0
+# duration_offset_501: 0
 {% endif %}
 
 # -----------------------------------------------------------------------------

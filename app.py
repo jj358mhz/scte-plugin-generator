@@ -17,7 +17,7 @@ from typing import Any
 from flask import Flask, render_template, request, send_file, abort
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-GENERATOR_VERSION = '1.1.2'  # bump on meaningful generator changes
+GENERATOR_VERSION = '1.2.0'  # bump on meaningful generator changes
 
 app = Flask(__name__)
 
@@ -99,6 +99,8 @@ def parse_methods_from_form(form) -> list[dict[str, str]]:
                 pairs.append((34, 35, 'Break'))
             if form.get('seg_pair_48_49') == 'on':
                 pairs.append((48, 49, 'Provider Advertisement'))
+            if form.get('seg_pair_50_51') == 'on':
+                pairs.append((50, 51, 'Distributor Advertisement'))
             if form.get('seg_pair_54_55') == 'on':
                 pairs.append((54, 55, 'Distributor Placement Opportunity'))
             # Default: 34/35 + 48/49 + 54/55 if nothing selected

@@ -21,6 +21,18 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.2.0] — 2026-09-03
+
+### Added
+- **Linear preset: SCTE-35 segmentation type 50/51 (Distributor Advertisement) as an opt-in pair.** New form checkbox alongside 32/33, 34/35, 48/49, 54/55. Unchecked by default — existing default pair selection unchanged.
+- **Linear preset: per-seg-id timing offset keys in `uplynk.conf`.** The reference config now emits `pts_offset_<start>`, `pts_offset_<end>`, and `duration_offset_<start>` for every selected pair, plus `pts_offset_16` for Program Start and `pts_offset_500` / `pts_offset_501` / `duration_offset_501` for splice_insert OON timing. Previously these keys were consumed by the plugin at runtime but not surfaced in the reference config; users had to know to add them. Existing deployments are unaffected — the keys default to 0 whether present or not.
+
+### Changed
+- **Linear preset: `ad_break_ids_seen` observation list now includes 50/51.** When `scte_ad_break_mode='splice_insert'` and a Type 6 message arrives carrying Distributor Advertisement seg IDs, the "observed but ignoring" log line now reports them instead of silently dropping them.
+
+### Docs
+- **Generated plugin README: SCTE-35 refresher table adds rows for 0x32/0x33 (Distributor Advertisement Start/End).** The Provider vs Distributor paragraph below the table now distinguishes "advertisement" pairs (0x30/0x31, 0x32/0x33) from "placement opportunity" pairs (0x34/0x35, 0x36/0x37).
+
 ## [1.1.2] - 2026-08-22
 
 ### Added

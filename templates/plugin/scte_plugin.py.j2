@@ -97,7 +97,7 @@ STREAM_TYPE = {}
 # --- 4. Runtime toggles ---
 SCTE_LOG_VERBOSITY = '2'
 PLUGIN_MEMORY_LOGGING = False
-ZERO_DUR = False
+ZERO_DUR_PAIRS = set()  # (start_id, end_id) tuples whose last START had duration=0
 
 {% if has_linear %}
 # --- 5a. `linear` preset state ---
@@ -1009,8 +1009,20 @@ def Initialize():
     return slicer.Initialize()
 
 
-def Notify():
-    """Non-SCTE lifecycle notifications. Currently unused."""
+def Notify(pts):
+    """
+    Non-SCTE lifecycle notification callback.
+
+    The Uplynk slicer invokes this as Notify(pts) whenever a SetNotify()
+    callback is registered. Even though this plugin doesn't currently use
+    the notification, the signature must accept the pts argument or the
+    slicer will TypeError on invocation.
+
+    Args:
+        pts: PTS time of the notification event (base48k uPTS). Unused
+            in this implementation; accepted to satisfy the runtime contract.
+    """
+    del pts  # explicitly discard — silences linters and documents intent
     return int(0)
 
 

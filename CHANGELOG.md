@@ -21,6 +21,15 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.2.1] — 2026-09-03
+
+### Fixed
+- **`Notify()` signature now accepts `pts` argument.** Per the Uplynk slicer contract, `Notify(pts)` is invoked with a PTS argument whenever a `SetNotify()` callback is registered. The previous zero-arg signature would `TypeError` and crash the slicer process on invocation. Latent bug — no current customer config wires up SetNotify — but a real crash for anyone who does.
+- **Type 6 zero-duration START events now correctly skip both AdStart and the matching AdEnd.** Previously the `ZERO_DUR` bool was set True and immediately reset to False on the same line, so the END-side guard was dead code. If a provider sent a segmentation descriptor with `segmentation_duration=0`, the plugin would still call `AdStart(pts, 0)` — which disables the slicer's auto-return timer and, combined with a missing mating END, sends the slicer into an infinite ad break. This scenario bit an affiliate several years ago and drove the original (broken) fix. The correct implementation records the offending `(start_id, end_id)` pair in a `ZERO_DUR_PAIRS` set on START, consults and clears it on END, and evicts stale entries on any subsequent valid START for the same pair.
+
+### Changed
+- **Removed duplicated `dur_off_x` / `pts_off_x` calls in the Type 6 START handler.** Offsets are now computed once, after the duration check, only when needed.
+
 ## [1.2.0] — 2026-09-03
 
 ### Added

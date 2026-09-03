@@ -30,7 +30,7 @@ def {{ m.name }}(slice_info, slicer_id):
         slice_info (dict): SCTE bridge object from Process35.
         slicer_id (str): This slicer's ID from slicer.GetStatus.
     """
-    global SLICER_CONFIG_DICT, SLICER_STATUS_DICT, ZERO_DUR
+    global SLICER_CONFIG_DICT, SLICER_STATUS_DICT, ZERO_DUR_PAIRS
 {% if 'boundary_handling' in features %}
     global BOUNDARY_MODE
 {% endif %}
@@ -395,15 +395,21 @@ def {{ m.name }}(slice_info, slicer_id):
 def _handle_time_signal_ad_breaks(slice_info, slicer_id, seg_type_list,
                                   descriptors, pts, **kwargs):
     """
-    Handle Type 6 ad-break seg IDs when scte_ad_break_mode='time_signal'.
+        START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.
 
-    START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.
-    Zero-duration START events: fire-and-reset ZERO_DUR flag, skip AdStart.
-    No END-side ZERO_DUR check — cannot assume matching END will arrive.
+    Zero-duration START events: record the (start_id, end_id) pair in
+    ZERO_DUR_PAIRS, skip AdStart to prevent an infinite ad break (calling
+    AdStart with duration=0 disables the slicer's auto-return timer, and
+    if the mating END is also lost the slicer loops in-break forever).
+    When the matching END arrives, it consults ZERO_DUR_PAIRS, skips AdEnd,
+    and clears the entry. If the matching END never arrives, the entry
+    persists until the next valid START for the same pair evicts it (see
+    the discard at the top of the START else branch). This prevents a
+    stale entry from one bogus break corrupting a later good pair's END.
 
     Active pairs driven by m.seg_id_pairs from the generator form.
     """
-    global ZERO_DUR
+    global ZERO_DUR_PAIRS
     call_sign = kwargs.get('call_sign', '-')
     slicer_version = kwargs.get('slicer_version', '-')
     stream_type = kwargs.get('stream_type', '-')
@@ -417,23 +423,25 @@ def _handle_time_signal_ad_breaks(slice_info, slicer_id, seg_type_list,
         ({{ pair[0] }}, {{ pair[1] }}, '{{ pair[2] }}'),
 {% endfor %}
     ):
-        # ----- START handler -----
+                # ----- START handler -----
         if start_id in seg_type_list:
             index = seg_type_list.index(start_id)
             upid_bytes = descriptors[index].get('segmentation_upid', b'')
             upid = str(upid_bytes, 'UTF-8') if upid_bytes else ''
             duration = break_dur(slice_info, index)
-            duration_offset = dur_off_x(start_id)
-            pts_offset = pts_off_x(start_id)
 
             if duration == 0:
-                ZERO_DUR = True
+                ZERO_DUR_PAIRS.add((start_id, end_id))
                 log(f'[upl-py_Err] From {start_id} (0x{start_id:02x}, {seg_name} Start), '
-                    f'setting ZERO_DUR to True - invalid duration is: 0 pts, skipping ad break',
+                    f'invalid duration=0 pts — skipping AdStart to prevent infinite ad break. '
+                    f'Matching END ({end_id}) will also be skipped when it arrives.',
                     segmentation_type_id=start_id, call_sign=call_sign,
                     slicer_version=slicer_version, stream_type=stream_type)
-                ZERO_DUR = False
                 continue
+
+            # Valid duration — evict any stale ZERO_DUR entry from a prior bogus
+            # START for this pair, so a lingering flag can't corrupt this good END.
+            ZERO_DUR_PAIRS.discard((start_id, end_id))
 
             duration_offset = dur_off_x(start_id)
             pts_offset = pts_off_x(start_id)
@@ -479,14 +487,11 @@ def _handle_time_signal_ad_breaks(slice_info, slicer_id, seg_type_list,
 
         # ----- END handler -----
         if end_id in seg_type_list:
-            if ZERO_DUR:
-                log(f'[upl-py_Err] From {start_id}, invalid duration, '
-                    f'skipping {end_id} SCTE logic',
-                    segmentation_type_id=end_id, call_sign=call_sign,
-                    slicer_version=slicer_version, stream_type=stream_type)
-                ZERO_DUR = False
-                log(f'[upl-py_Err] Setting ZERO_DUR variable to False. '
-                    f'Resuming processing {start_id}/{end_id}',
+            if (start_id, end_id) in ZERO_DUR_PAIRS:
+                ZERO_DUR_PAIRS.discard((start_id, end_id))
+                log(f'[upl-py_Err] From {end_id} (0x{end_id:02x}, {seg_name} End), '
+                    f'skipping AdEnd — matching START ({start_id}) had invalid duration=0. '
+                    f'Slicer never entered ad break; nothing to close.',
                     segmentation_type_id=end_id, call_sign=call_sign,
                     slicer_version=slicer_version, stream_type=stream_type)
                 continue

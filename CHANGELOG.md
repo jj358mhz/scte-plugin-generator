@@ -21,6 +21,17 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.3.3] - 2026-09-04
+
+### Fixed
+- Rendered plugin: PyCharm frame-guard warning in `log()`. Replaced the compound `if frame is not None and frame.f_back is not None` guard with a nested guard that assigns `frame.f_back` to a local before dereferencing, so type narrowing sticks.
+- Rendered plugin: type-narrowing cascade in `SlicerLogger()` f-strings. Added `-> str` / `-> int` / `-> bool` / `-> float` / `-> dict` return annotations to every config parser (`call_sign_id`, `gain_value`, `get_api_port`, `pts_off_x`, `dur_off_x`, `pt_mode`, `profile_id`, `scte_wakeup_enabled`, `signal_type`, `slicer_ver`, `stream_type_id`, `boundary_mode`, `boundary_duration_max`, `boundary_name_for`, `oon_mode`, `pgm_start_mode`, `local_mode`, `ad_break_mode`, `ad_skip_spliceinsert`, `ad_skip_timesignal`, `api_url`, `ad_meta_keys`, `meta_key`, `uac_mode`) and to `adis()`. Eliminates the `Any | None` inference that was fanning out into ~19 warnings across every generated plugin.
+- Rendered plugin: unused-parameter warnings on `gain_value(gain=None)` (added `del gain`) and `HandleCall(origin_url, response, code, request_id)` (added `# noinspection PyUnusedLocal` above the def, since Jinja-branch analysis makes `del` unsafe when `has_live_event` / `has_oon` are enabled).
+
+### Notes
+- All fixes are template-side and additive — no runtime behavior changes.
+- Rendered plugin version stamp still defaults to `0.0.1`; only `GENERATOR_VERSION` bumps.
+
 ## [1.3.2] - 2026-09-03
 
 ### Fixed

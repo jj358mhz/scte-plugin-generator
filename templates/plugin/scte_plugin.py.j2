@@ -250,7 +250,7 @@ def break_dur_oon(slice_info):
     return duration_48k
 
 
-def adis(duration, duration_offset):
+def adis(duration, duration_offset) -> float:
     """
     Approximate Duration In Seconds — convert LiveSlicer base48k uPTS to seconds.
 
@@ -289,8 +289,10 @@ def log(message, **kwargs):
 
     frame = inspect.currentframe()
     caller_func = '-'
-    if frame is not None and frame.f_back is not None:
-        caller_func = frame.f_back.f_code.co_name
+    if frame is not None:
+        back = frame.f_back
+        if back is not None:
+            caller_func = back.f_code.co_name
 
     slicer_state = slicer.GetState()
     scte_message = '-'
@@ -352,7 +354,7 @@ def get_slicer_metrics(api_port=None):
 # Config parsers (baseline)
 # -----------------------------------------------------------------------------
 
-def call_sign_id(call_sign=None):
+def call_sign_id(call_sign=None) -> str:
     """Extract call_sign from uplynk.conf. Cached."""
     global CALL_SIGN
     if call_sign in CALL_SIGN:
@@ -366,8 +368,9 @@ def call_sign_id(call_sign=None):
         return '-'
 
 
-def gain_value(gain=None):
+def gain_value(gain=None) -> str:
     """Extract gain from uplynk.conf."""
+    del gain  # explicitly discard — silences linters and documents intent
     try:
         return SLICER_CONFIG_DICT.get('gain', '-')
     except Exception as e:
@@ -375,7 +378,7 @@ def gain_value(gain=None):
         return '-'
 
 
-def get_api_port(api_port=None):
+def get_api_port(api_port=None) -> int:
     """Extract api_port from uplynk.conf. Cached. Default 65009."""
     global API_PORT
     if api_port in API_PORT:
@@ -389,7 +392,7 @@ def get_api_port(api_port=None):
         return 65009
 
 
-def pts_off_x(off):
+def pts_off_x(off) -> int:
     """Extract per-SCTE-type PTS offset. Cached per type."""
     global PTS_OFF
     if off in PTS_OFF:
@@ -404,7 +407,7 @@ def pts_off_x(off):
         return 0
 
 
-def dur_off_x(off):
+def dur_off_x(off) -> int:
     """Extract per-SCTE-type duration offset. Cached per type."""
     global DUR_OFF
     if off in DUR_OFF:
@@ -419,7 +422,7 @@ def dur_off_x(off):
         return 0
 
 
-def pt_mode(passthrough_mode=None):
+def pt_mode(passthrough_mode=None) -> bool:
     """Parse passthrough_mode. Boolean. Cached."""
     global PASSTHROUGH_MODE
     if passthrough_mode in PASSTHROUGH_MODE:
@@ -434,7 +437,7 @@ def pt_mode(passthrough_mode=None):
         return False
 
 
-def profile_id(current_profile=None):
+def profile_id(current_profile=None) -> str:
     """Extract profile GUID. Cached."""
     global PROFILE_GUID
     if current_profile in PROFILE_GUID:
@@ -448,7 +451,7 @@ def profile_id(current_profile=None):
         return '-'
 
 
-def scte_wakeup_enabled(flag=None):
+def scte_wakeup_enabled(flag=None) -> bool:
     """
     Parse allow_scte_wakeup from uplynk.conf.
 
@@ -479,7 +482,7 @@ def scte_wakeup_enabled(flag=None):
         return False
 
 
-def signal_type(signal=None):
+def signal_type(signal=None) -> str:
     """Extract signal_type. Cached."""
     global SIGNAL_TYPE
     if signal in SIGNAL_TYPE:
@@ -493,7 +496,7 @@ def signal_type(signal=None):
         return '-'
 
 
-def slicer_ver(slicer_version=None):
+def slicer_ver(slicer_version=None) -> str:
     """Extract slicer_version. Cached."""
     global SLICER_VERSION
     if slicer_version in SLICER_VERSION:
@@ -507,7 +510,7 @@ def slicer_ver(slicer_version=None):
         return '-'
 
 
-def stream_type_id(stream_type=None):
+def stream_type_id(stream_type=None) -> str:
     """Extract stream_type. Cached."""
     global STREAM_TYPE
     if stream_type in STREAM_TYPE:
@@ -526,7 +529,7 @@ def stream_type_id(stream_type=None):
 # Boundary handling parsers
 # -----------------------------------------------------------------------------
 
-def boundary_mode(use_boundary=None):
+def boundary_mode(use_boundary=None) -> bool:
     """Parse boundary_handling + per-source names. Populates BOUNDARY_MODE dict."""
     global BOUNDARY_MODE
     if use_boundary in BOUNDARY_MODE:
@@ -544,7 +547,7 @@ def boundary_mode(use_boundary=None):
         return False
 
 
-def boundary_duration_max():
+def boundary_duration_max() -> int:
     """Cap duration for boundary mode. 0 = no cap."""
     global BOUNDARY_DUR_MAX
     if 'value' in BOUNDARY_DUR_MAX:
@@ -558,7 +561,7 @@ def boundary_duration_max():
         return 0
 
 
-def boundary_name_for(seg_id):
+def boundary_name_for(seg_id) -> str:
     """
     Resolve boundary name for a seg_id.
 
@@ -583,7 +586,7 @@ def boundary_name_for(seg_id):
 # Linear preset parsers
 # -----------------------------------------------------------------------------
 
-def oon_mode(outofnetwork_mode=None):
+def oon_mode(outofnetwork_mode=None) -> bool:
     """Parse outofnetwork_mode. Cached."""
     global OUTOFNETWORK_MODE
     if outofnetwork_mode in OUTOFNETWORK_MODE:
@@ -598,7 +601,7 @@ def oon_mode(outofnetwork_mode=None):
         return False
 
 
-def pgm_start_mode(pgm_start_via_scte=None):
+def pgm_start_mode(pgm_start_via_scte=None) -> bool:
     """Parse program_start_via_scte_mode. Gates whether Type 16 fires ContentStart."""
     global PROGRAM_START_VIA_SCTE_MODE
     if pgm_start_via_scte in PROGRAM_START_VIA_SCTE_MODE:
@@ -613,7 +616,7 @@ def pgm_start_mode(pgm_start_via_scte=None):
         return True
 
 
-def local_mode(mode=None):
+def local_mode(mode=None) -> str:
     """Parse local_mode. Tri-state: 'local' | 'national' | 'oon'."""
     global LOCAL_MODE
     if mode in LOCAL_MODE:
@@ -630,7 +633,7 @@ def local_mode(mode=None):
         return 'national'
 
 
-def ad_break_mode(mode=None):
+def ad_break_mode(mode=None) -> str:
     """
     Parse scte_ad_break_mode. 'splice_insert' | 'time_signal'.
 
@@ -653,7 +656,7 @@ def ad_break_mode(mode=None):
         return 'splice_insert'
 
 
-def ad_skip_spliceinsert(skip_flag=None):
+def ad_skip_spliceinsert(skip_flag=None) -> bool:
     """Parse ad_skip_spliceinsert. When True, all command_type=5 events are skipped."""
     global AD_SKIP_SPLICEINSERT
     if skip_flag in AD_SKIP_SPLICEINSERT:
@@ -668,7 +671,7 @@ def ad_skip_spliceinsert(skip_flag=None):
         return False
 
 
-def ad_skip_timesignal(skip_flag=None):
+def ad_skip_timesignal(skip_flag=None) -> bool:
     """Parse ad_skip_timesignal. When True, all command_type=6 events are skipped."""
     global AD_SKIP_TIMESIGNAL
     if skip_flag in AD_SKIP_TIMESIGNAL:
@@ -687,7 +690,7 @@ def ad_skip_timesignal(skip_flag=None):
 # OON preset parsers (async WebCall + EPG enrichment)
 # -----------------------------------------------------------------------------
 
-def api_url(key=None):
+def api_url(key=None) -> str:
     """Extract api_url_<key> values. Cached per key."""
     global API_URL
     if key in API_URL:
@@ -701,7 +704,7 @@ def api_url(key=None):
         return '-'
 
 
-def ad_meta_keys():
+def ad_meta_keys() -> dict:
     """Extract AdMeta key name mappings. Cached."""
     global AD_META_KEYS
     if 'content_id' in AD_META_KEYS:
@@ -716,12 +719,12 @@ def ad_meta_keys():
         return {'content_id': 'content_id', 'content_title': 'content_title', 'pod_duration': 'pod_duration'}
 
 
-def meta_key(name):
+def meta_key(name) -> str:
     """Thin wrapper for slicer.AdMeta() call sites."""
     return ad_meta_keys().get(name, name)
 
 
-def uac_mode(mode=None):
+def uac_mode(mode=None) -> bool:
     """Parse uac_mode. Boolean. Cached."""
     global UAC_MODE
     if mode in UAC_MODE:
@@ -1047,6 +1050,7 @@ def Notify(pts):
     return int(0)
 
 
+# noinspection PyUnusedLocal
 def HandleCall(origin_url=None, response=None, code=None, request_id=None):
     """
     Callback for async slicer.APICall() / slicer.WebCall() responses.

@@ -83,6 +83,13 @@ HOST = socket.gethostname()
 SLICER_STATUS_DICT = {}
 SLICER_CONFIG_DICT = {}
 
+# TTL cache for get_slicer_metrics() — verbosity='3' logging calls this on
+# every SCTE-35 message; without caching, each call blocks up to the HTTP
+# timeout on the slicer's own /status endpoint and can push handler execution
+# past _EXEC_TIME_BUDGET on busy feeds.
+_METRICS_CACHE = {'value': '-', 'fetched_at': 0.0}
+_METRICS_CACHE_TTL = 5.0  # seconds
+
 # --- 3. Config parameter caches ---
 API_PORT = {}
 CALL_SIGN = {}
@@ -317,14 +324,28 @@ def log(message, **kwargs):
 
 
 def get_slicer_metrics(api_port=None):
-    """Fetch slicer status for verbosity='3'. Never raises."""
+    """
+    Fetch slicer status for verbosity='3' logging. Cached for
+    _METRICS_CACHE_TTL seconds to prevent per-log-call blocking on the
+    slicer's own API port — log() is called on every SCTE-35 message, so an
+    uncached 1s HTTP timeout can push handler execution past
+    _EXEC_TIME_BUDGET on busy feeds. Never raises.
+    """
+    now = time.time()
+    if now - _METRICS_CACHE['fetched_at'] < _METRICS_CACHE_TTL:
+        return _METRICS_CACHE['value']
+
     if api_port is None:
         api_port = get_api_port()
     try:
-        response = requests.get(f'http://localhost:{api_port}/status', timeout=1.0)
-        return str(response.json())
+        response = requests.get(f'http://localhost:{api_port}/status', timeout=0.5)
+        value = str(response.json())
     except Exception as e:
-        return f'- (metrics fetch failed: {e})'
+        value = f'- (metrics fetch failed: {e})'
+
+    _METRICS_CACHE['value'] = value
+    _METRICS_CACHE['fetched_at'] = now
+    return value
 
 
 # -----------------------------------------------------------------------------

@@ -21,6 +21,18 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.3.1] - 2026-09-03
+
+### Fixed
+- `get_slicer_metrics()` now caches its result for 5 seconds, preventing per-log-call blocking on the slicer's local `/status` endpoint. At `scte_log_verbosity: 3`, `log()` is invoked on every SCTE-35 message; the previous uncached 1-second HTTP timeout could push handler execution past `_EXEC_TIME_BUDGET` (250ms) on busy feeds — worst case when the slicer's own API was slow under load, which is precisely when metrics matter most.
+
+### Changed
+- `get_slicer_metrics()` HTTP timeout reduced from 1.0s to 0.5s. The TTL cache dampens fetch frequency enough that a tighter timeout further limits worst-case blocking on the rare cache-miss + slow-API combination.
+
+### Notes
+- Fully internal fix. No `uplynk.conf` changes required for existing deployments.
+- Metrics values shown in verbosity=3 logs may now be up to 5 seconds stale. This is diagnostic output; acceptable trade for eliminating handler-thread blocking.
+
 ## [1.3.0] — 2026-09-03
 
 ### Fixed

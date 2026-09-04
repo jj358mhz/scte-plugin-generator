@@ -21,6 +21,14 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.3.2] - 2026-09-03
+
+### Fixed
+- Removed a stray `{% endif %}` in `templates/plugin/_method_linear.py.j2` that caused `TemplateSyntaxError: Encountered unknown tag 'endif'` when generating any linear-preset plugin. Introduced during the v1.3.0 Type 5 OON-first dispatch rewrite; latent because smoke-testing after v1.3.0 exercised the `live_event` and `oon` presets, not `linear`.
+
+### Notes
+- Generator-only fix. No changes to rendered plugin behavior, no `uplynk.conf` impact, no action needed for existing deployments. Users who tried to generate a linear preset between v1.3.0 and v1.3.2 would have seen the render error; regenerating after this release resolves it.
+
 ## [1.3.1] - 2026-09-03
 
 ### Fixed

@@ -446,7 +446,6 @@ def {{ m.name }}(slice_info, slicer_id):
                         command_type=command_type, oon=oon,
                         call_sign=call_sign, slicer_version=slicer_version,
                         stream_type=stream_type)
-{% endif %}
 
         else:
             log('[upl-py_Err] Unhandled SCTE command type',

@@ -1085,7 +1085,7 @@ def HandleCall(origin_url=None, response=None, code=None, request_id=None):
     return int(0)
 
 
-def Process35(slice_info):
+def Process35(slice_info: slicer.SliceInfo) -> int:
     """
     Called for every SCTE-35 packet on the input stream. SCTE-104 → SCTE-35 upstream.
 

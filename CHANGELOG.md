@@ -21,6 +21,15 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.3.5] - 2026-09-05
+
+### Fixed
+- Rendered plugin (linear preset): `oon = command.get('out_of_network_indicator')` in `_method_linear.py.j2` was missing a default. When a `splice_insert` arrives without the field, `oon` becomes `None` and the downstream `if oon == 1:` / `if oon == 0:` branches both silently fall through, skipping OON handling entirely. Added explicit `, 0` default, matching the already-correct pattern in `_method_scte_logger.py.j2`. Latent bug fix — no runtime regression, but the missing-field case now dispatches correctly.
+
+### Notes
+- Discovered during post-v1.3.4 verification of the freshly-rendered WMA plugin.
+- Rendered plugins now consistent across templates on OON extraction pattern.
+
 ## [1.3.4] - 2026-09-05
 
 ### Fixed

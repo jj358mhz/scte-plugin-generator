@@ -289,7 +289,7 @@ def {{ m.name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
                     stream_type=stream_type)
             else:
                 command = slice_info.get('command', {})
-                oon = command.get('out_of_network_indicator')
+                oon = command.get('out_of_network_indicator', 0)
                 duration_flag = command.get('duration_flag', 0)
                 log(f'[upl-py_Meta] OON state: {oon}, duration_flag: {duration_flag}',
                     command_type=command_type, oon=oon)

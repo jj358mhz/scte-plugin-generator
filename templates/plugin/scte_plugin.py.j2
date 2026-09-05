@@ -205,7 +205,7 @@ def _normalize_verbosity(raw, default='2'):
 # Duration extraction helpers
 # -----------------------------------------------------------------------------
 
-def break_dur(slice_info, index):
+def break_dur(slice_info: slicer.SliceInfo, index: int) -> int:
     """
     Standardizes the PTS message time to uPTS (base48k).
 
@@ -228,7 +228,7 @@ def break_dur(slice_info, index):
     return duration_48k
 
 
-def break_dur_oon(slice_info):
+def break_dur_oon(slice_info: slicer.SliceInfo) -> int:
     """
     Standardizes the PTS message time to uPTS (base48k) for Type 5, OON=1.
 
@@ -1051,7 +1051,7 @@ def Notify(pts):
 
 
 # noinspection PyUnusedLocal
-def HandleCall(origin_url=None, response=None, code=None, request_id=None):
+def HandleCall(_origin_url=None, _response=None, _code=None, _request_id=None):
     """
     Callback for async slicer.APICall() / slicer.WebCall() responses.
 
@@ -1105,7 +1105,7 @@ def Process35(slice_info: slicer.SliceInfo) -> int:
         slicer_values = slicer.GetStatus()
         config = slicer_values.get('config', {})
         channel_group = config.get('channel_group')
-        slicer_id = slicer_values.get('slicerID')
+        slicer_id = slicer_values.get('slicerID', '')
 
         # Leak-safe summary dict — NEVER the raw slice_info bridge object
         SLICER_STATUS_DICT.update({

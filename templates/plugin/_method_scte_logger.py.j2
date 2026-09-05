@@ -73,7 +73,7 @@ _SCTE_LOGGER_TABLE = {
 }
 
 
-def {{ m.name }}(slice_info, slicer_id):
+def {{ m.name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
     channel_group = '{{ m.channel_group }}'
     log(f'[upl-py_Method] In {channel_group} method for slicer: {slicer_id}')
 
@@ -113,6 +113,7 @@ def {{ m.name }}(slice_info, slicer_id):
 
         for i, descriptor in enumerate(descriptors):
             seg_id = descriptor.get('segmentation_type_id')
+            # noinspection PyUnreachableCode
             if seg_id is None:
                 log(f'[upl-py_SCTE] descriptor[{i}] has no segmentation_type_id, skipping',
                     command_type=command_type)

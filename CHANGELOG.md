@@ -21,6 +21,20 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.3.4] - 2026-09-05
+
+### Fixed
+- Rendered plugin: eliminated the surviving `Any | None` cascade from `slice_info.get(...)` extractions that v1.3.3's parser annotations couldn't reach. Root cause was the untyped slicer runtime bridge — fixed jointly with `uplynk-slicer-stubs` v0.2.0, which introduces `SliceInfo`, `SpliceCommand`, and `SegmentationDescriptor` TypedDicts. Templates now annotate every function that receives `slice_info` (`Process35`, `break_dur`, `break_dur_oon`, and both channel-group methods `LinearNewsMax` / `SCTELogger`) with `slicer.SliceInfo`, so type flow propagates through the dispatch chain.
+- Rendered plugin: `HandleCall` unused-parameter warnings. v1.3.3's `# noinspection PyUnusedLocal` above the def didn't apply because PyCharm scopes that inspection to local variables, not parameters. Renamed to `_origin_url`, `_response`, `_code`, `_request_id` — the standard "intentionally unused" convention for parameters. Safe because the slicer runtime calls `HandleCall` positionally.
+- Rendered plugin: `_handle_time_signal_ad_breaks` unused-parameter warning on `slicer_id`. Genuinely unused in the function body (dead inherited param); renamed to `_slicer_id`. Sole caller in `_method_linear.py.j2` invokes positionally.
+- Rendered plugin: workaround for a PyCharm inference bug on `total=False` TypedDict `.get()` lookups, where `descriptor.get('segmentation_type_id')` was wrongly inferred as `int` instead of `int | None`, marking the `if seg_id is None:` guard branch as unreachable. Added `# noinspection PyUnreachableCode` above the guard in `_method_scte_logger.py.j2`. The guard is genuinely reachable at runtime — malformed segmentation descriptors do occur.
+- Rendered plugin: `slicer_id` inference at extraction. `slicer_values.get('slicerID')` returned `Any | None` because `slicer.GetStatus()` is currently typed as plain `dict` in the stubs. Added explicit `''` default to collapse the type at the extraction site until the stubs narrow `GetStatus()` in a future release.
+
+### Notes
+- Requires `uplynk-slicer-stubs >= 0.2.0` installed in the plugin's dev venv for PyCharm to resolve the new TypedDict annotations. Runtime plugins are unaffected — stubs are dev-only, not shipped with the plugin.
+- Result: fresh WMA render (linear preset, default features) went from **24 PyCharm warnings under v1.3.3 to 0 under v1.3.4**.
+- All template-side fixes are additive; no runtime behavior changes.
+
 ## [1.3.3] - 2026-09-04
 
 ### Fixed

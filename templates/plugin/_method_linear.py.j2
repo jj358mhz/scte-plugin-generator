@@ -22,7 +22,7 @@
 #   False (default): return immediately on blackout — sticky, SCTE cannot wake slicer.
 #   True: suppress ad breaks only; Type 16 still fires ContentStart.
 
-def {{ m.name }}(slice_info, slicer_id):
+def {{ m.name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
     """
     `{{ m.channel_group }}` channel-group method — linear-channel SCTE handler.
 
@@ -456,7 +456,7 @@ def {{ m.name }}(slice_info, slicer_id):
             call_sign=call_sign)
 
 
-def _handle_time_signal_ad_breaks(slice_info, slicer_id, seg_type_list,
+def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
                                   descriptors, pts, **kwargs):
     """
         START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.

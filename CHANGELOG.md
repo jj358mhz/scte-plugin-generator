@@ -21,6 +21,14 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.3.6] - 2026-09-08
+
+### Added
+- `from __future__ import annotations` at the top of `scte_plugin.py.j2`, immediately after the module docstring. Rendered plugins now defer evaluation of type annotations at runtime.
+
+### Fixed
+- Plugins rendered from v1.3.4 and v1.3.5 failed to load under LiveSlicer runtime with `AttributeError: module 'slicer' has no attribute 'SliceInfo'`. The `slicer.SliceInfo` (and other TypedDict) annotations introduced in v1.3.4 exist only in `uplynk-slicer-stubs` v0.2.0+ for static analysis; the runtime `slicer` C-extension module has no such attribute. Deferring annotation evaluation via `from __future__ import annotations` makes annotations lazy strings at runtime while preserving full type-checker visibility. No behavioral change to SCTE-35 handling in rendered plugins.
+
 ## [1.3.5] - 2026-09-05
 
 ### Fixed

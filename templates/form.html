@@ -94,8 +94,11 @@
                         <span class="method-tag">linear</span>
                     </div>
                     <p class="method-desc">
-                        Type 5 splice_insert OR Type 6 seg-ID (34/35, 48/49, 54/55) ad breaks,
-                        selected at runtime via <code>scte_ad_break_mode</code>. Type 16
+                        Type 5 splice_insert OR Type 6 seg-ID ad breaks, selected at
+                        runtime via <code>scte_ad_break_mode</code>. Which Type 6 pairs
+                        the plugin knows about is set below (gen-time); which role's
+                        pairs actually fire is set at runtime via
+                        <code>ad_break_scope</code> in <code>uplynk.conf</code>. Type 16
                         program starts handled independently.
                     </p>
                     <div class="method-fields">
@@ -111,30 +114,70 @@
                         </div>
                     </div>
                     <div class="method-options">
-                    <div class="options-label">Type 6 ad-break seg_id pairs</div>
-                    <div class="options-chips">
-                        <label class="chip">
-                            <input type="checkbox" name="seg_pair_32_33" value="on">
-                            <span>32/33 Chapter</span>
-                        </label>
-                        <label class="chip">
-                            <input type="checkbox" name="seg_pair_34_35" value="on" checked>
-                            <span>34/35 Break</span>
-                        </label>
-                        <label class="chip">
-                            <input type="checkbox" name="seg_pair_48_49" value="on" checked>
-                            <span>48/49 Provider Ad</span>
-                        </label>
-                        <label class="chip">
-                            <input type="checkbox" name="seg_pair_50_51" value="on">
-                            <span>50/51 Distributor Ad</span>
+                        <div class="options-label">Runtime role scope
+                            (<code>ad_break_scope</code>)</div>
+                        <div class="options-chips">
+                            <label class="chip">
+                                <input type="radio" name="ad_break_scope_linear"
+                                       value="provider">
+                                <span>Provider (network operator)</span>
                             </label>
-                        <label class="chip">
-                            <input type="checkbox" name="seg_pair_54_55" value="on" checked>
-                            <span>54/55 Distributor PO</span>
-                        </label>
+                            <label class="chip">
+                                <input type="radio" name="ad_break_scope_linear"
+                                       value="distributor">
+                                <span>Distributor (affiliate / MVPD)</span>
+                            </label>
+                            <label class="chip">
+                                <input type="radio" name="ad_break_scope_linear"
+                                       value="both" checked>
+                                <span>Both (default)</span>
+                            </label>
+                        </div>
+
+                        <div class="options-label">Type 6 pairs to bake in — outside role split</div>
+                        <div class="options-chips">
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_32_33_linear" value="on">
+                                <span>32/33 Chapter</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_34_35_linear" value="on" checked>
+                                <span>34/35 Break</span>
+                            </label>
+                        </div>
+
+                        <div class="options-label">Type 6 pairs to bake in — Provider role</div>
+                        <div class="options-chips">
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_48_49_linear" value="on" checked>
+                                <span>48/49 Advertisement</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_52_53_linear" value="on">
+                                <span>52/53 Placement Opportunity</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_56_57_linear" value="on">
+                                <span>56/57 Overlay Placement Opp.</span>
+                            </label>
+                        </div>
+
+                        <div class="options-label">Type 6 pairs to bake in — Distributor role</div>
+                        <div class="options-chips">
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_50_51_linear" value="on">
+                                <span>50/51 Advertisement</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_54_55_linear" value="on" checked>
+                                <span>54/55 Placement Opportunity</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_58_59_linear" value="on">
+                                <span>58/59 Overlay Placement Opp.</span>
+                            </label>
+                        </div>
                     </div>
-                </div>
                 </label>
 
                 {# --- Live Event method --- #}

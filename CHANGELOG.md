@@ -21,6 +21,26 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.4.0] - 2026-09-09
+
+### Added
+- `ad_break_scope` — new runtime config axis for Type 6 ad-break signaling. Splits ad-break segmentation type IDs into Provider role (48/49 Advertisement, 52/53 Placement Opportunity, 56/57 Overlay Placement Opportunity) vs. Distributor role (50/51 Advertisement, 54/55 Placement Opportunity, 58/59 Overlay Placement Opportunity), per SCTE 35. Three values: `provider`, `distributor`, `both` (default). Exposed as a radio group in the generator form; baked into `example.conf.j2` as the operator's default; enforced at runtime in `_handle_time_signal_ad_breaks` with an `[upl-py_Mode] ad_break_scope=<x>, observed but ignoring out-of-scope Type 6 seg_ids: [...]` log line for pairs baked in at gen time but scope-filtered at fire time.
+- Three new Type 6 seg-ID pairs surfaced in the generator: 52/53 (Provider Placement Opportunity), 56/57 (Provider Overlay Placement Opportunity), 58/59 (Distributor Overlay Placement Opportunity). Form checkboxes ship unchecked by default.
+- Rendered plugin: `PROVIDER_AD_SEG_IDS`, `DISTRIBUTOR_AD_SEG_IDS`, `ROLE_TAGGED_AD_SEG_IDS`, `ALL_AD_BREAK_SEG_IDS` frozenset constants replacing hardcoded seg-ID tuples in the mode-mismatch and scope-filter log lines. Adding a new pair to a role now touches one constant instead of every log site that lists ad-break IDs.
+- Rendered plugin: `ad_break_scope()` config parser in `scte_plugin.py.j2`, `AD_BREAK_SCOPE = {}` memoization cache, and `_log_param('Ad break scope', ad_scope)` startup log in the Linear method.
+
+### Changed
+- Generator form field names normalized to preset-suffix convention: `seg_pair_XX_XX` → `seg_pair_XX_XX_linear`. Enables clean multi-instance expansion later (v1.5.0 multi-linear backlog) without a field-name migration inside the follow-up PR.
+- Linear preset form UX restructured: pair checkboxes grouped into three semantic sections (outside role split / Provider role / Distributor role) with sub-headers, and a new "Runtime role scope" radio group above them.
+- Rendered plugin: mode-mismatch "observed but ignoring" log now references `ALL_AD_BREAK_SEG_IDS` instead of the hardcoded 10-ID tuple — automatically picks up the three new pairs from this release.
+
+### Notes
+- Back-compat preserved: defaults (34/35 + 48/49 + 54/55, scope=both) reproduce pre-1.4 behavior byte-for-byte. Operators upgrading generated plugins do not need to change `uplynk.conf` — absent `ad_break_scope` defaults to `both` at runtime.
+- `ad_break_scope` composes with `scte_ad_break_mode`: the filter only applies when `scte_ad_break_mode=time_signal`. Under `splice_insert` mode the scope value is read and logged but does nothing (Type 5 has no seg IDs to filter).
+- Chapter (32/33) and Break (34/35) sit outside the role split and are unaffected by scope — if baked into the plugin at generation time, they fire regardless of `ad_break_scope`.
+- v1.4.1 backlog: remove dead `local_mode` code from `scte_plugin.py.j2`, `_method_live_event.py.j2`, `example.conf.j2` (helper defined but never called; config key silently no-op).
+- v1.4.2 backlog: gate unselected preset sections out of generated `uplynk.conf` (currently emitted commented-out even when preset code isn't compiled in, misleading operators about capability).
+
 ## [1.3.6] - 2026-09-08
 
 ### Added

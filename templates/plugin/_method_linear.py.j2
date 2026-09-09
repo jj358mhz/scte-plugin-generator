@@ -83,6 +83,9 @@ def {{ m.name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
         ad_mode = ad_break_mode()  # 'splice_insert' | 'time_signal'
         _log_param('SCTE ad break mode', ad_mode)
 
+        ad_scope = ad_break_scope()  # 'provider' | 'distributor' | 'both'
+        _log_param('Ad break scope', ad_scope)
+
         outofnetwork_mode = oon_mode()
         _log_param('Out of Network mode', outofnetwork_mode)
 
@@ -234,7 +237,7 @@ def {{ m.name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
                     stream_type=stream_type)
             elif ad_mode != 'time_signal':
                 ad_break_ids_seen = [s for s in seg_type_list
-                                     if s in (32, 33, 34, 35, 48, 49, 50, 51, 54, 55)]
+                                     if s in ALL_AD_BREAK_SEG_IDS]
                 if ad_break_ids_seen:
                     log(f'[upl-py_Mode] ad_break_mode={ad_mode}, observed but '
                         f'ignoring Type 6 ad-break seg_ids: {ad_break_ids_seen}',
@@ -250,10 +253,12 @@ def {{ m.name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
                     call_sign=call_sign,
                     slicer_version=slicer_version,
                     stream_type=stream_type,
+                    ad_scope=ad_scope,
 {% if 'boundary_handling' in features %}
                     use_boundary=use_boundary,
                     boundary_dur_max=boundary_dur_max,
 {% endif %}
+                )
                 )
 
         # =================================================================
@@ -473,14 +478,36 @@ def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
 
     Active pairs driven by m.seg_id_pairs from the generator form.
     """
-    global ZERO_DUR_PAIRS
+        global ZERO_DUR_PAIRS
     call_sign = kwargs.get('call_sign', '-')
     slicer_version = kwargs.get('slicer_version', '-')
     stream_type = kwargs.get('stream_type', '-')
+    ad_scope = kwargs.get('ad_scope', 'both')
 {% if 'boundary_handling' in features %}
     use_boundary = kwargs.get('use_boundary', False)
     boundary_dur_max = kwargs.get('boundary_dur_max', 0)
 {% endif %}
+
+    # ---------------------------------------------------------
+    # ad_break_scope filter — drop role-tagged seg IDs that don't
+    # match the runtime scope. Chapter (32/33) and Break (34/35)
+    # are outside the role split and are unaffected.
+    # ---------------------------------------------------------
+    if ad_scope == 'provider':
+        allowed_role_ids = PROVIDER_AD_SEG_IDS
+    elif ad_scope == 'distributor':
+        allowed_role_ids = DISTRIBUTOR_AD_SEG_IDS
+    else:
+        allowed_role_ids = ROLE_TAGGED_AD_SEG_IDS  # 'both'
+
+    dropped = [s for s in seg_type_list
+               if s in ROLE_TAGGED_AD_SEG_IDS and s not in allowed_role_ids]
+    if dropped:
+        log(f'[upl-py_Mode] ad_break_scope={ad_scope}, observed but '
+            f'ignoring out-of-scope Type 6 seg_ids: {dropped}',
+            call_sign=call_sign, slicer_version=slicer_version,
+            stream_type=stream_type)
+        seg_type_list = [s for s in seg_type_list if s not in dropped]
 
     for start_id, end_id, seg_name in (
 {% for pair in m.seg_id_pairs %}

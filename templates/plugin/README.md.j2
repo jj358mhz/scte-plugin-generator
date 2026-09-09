@@ -110,6 +110,27 @@ start/end on segmentation descriptor pairs:
 {% endfor %}
 {% endfor %}
 
+#### 🎚️ Runtime role scope — `ad_break_scope`
+
+Which of the baked-in role-tagged pairs actually fire at runtime is controlled
+by `ad_break_scope` in `uplynk.conf`. This lets one plugin serve either a
+provider-side or distributor-side deployment without regenerating.
+
+| Value | Honors |
+|---|---|
+| `provider` | 48/49, 52/53, 56/57 (Provider role) |
+| `distributor` | 50/51, 54/55, 58/59 (Distributor role) |
+| `both` | all role-tagged pairs *(default — back-compat)* |
+
+🎛️ **Current build defaults to:** `{% for m in methods if m.preset == 'linear' %}{{ m.ad_break_scope }}{% endfor %}`
+
+🔒 32/33 (Chapter) and 34/35 (Break) sit outside the role split — if they are
+in the pair list above, they fire regardless of `ad_break_scope`.
+
+📝 Pairs baked in at generation time but scope-filtered at fire time emit an
+`[upl-py_Mode] ad_break_scope=<x>, observed but ignoring out-of-scope seg_ids:`
+log line, so you can see whether a feed is sending role-mismatched signals.
+
 ✅ Use this preset for standard commercial broadcast feeds where every SCTE-35
 message is a straightforward break signal.
 

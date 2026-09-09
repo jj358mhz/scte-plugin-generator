@@ -121,6 +121,13 @@ local_mode: national
 passthrough_mode: 0
 program_start_via_scte_mode: 1
 scte_ad_break_mode: splice_insert
+# ad_break_scope: runtime role filter for Type 6 ad-break seg IDs.
+#   provider    — honor 48/49, 52/53, 56/57 (Provider role pairs)
+#   distributor — honor 50/51, 54/55, 58/59 (Distributor role pairs)
+#   both        — honor all role-tagged pairs (default)
+# 32/33 (Chapter) and 34/35 (Break) are outside the split and always fire
+# if baked into the plugin at generation time.
+ad_break_scope: {{ methods | selectattr('preset', 'equalto', 'linear') | map(attribute='ad_break_scope') | first }}
 ad_skip_spliceinsert: 0
 ad_skip_timesignal: 0
 
@@ -147,6 +154,7 @@ duration_offset_501: 0
 # passthrough_mode: 0
 # program_start_via_scte_mode: 1
 # scte_ad_break_mode: splice_insert
+# ad_break_scope: both
 # ad_skip_spliceinsert: 0
 # ad_skip_timesignal: 0
 # pts_offset_16: 0

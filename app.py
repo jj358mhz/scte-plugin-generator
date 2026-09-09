@@ -17,7 +17,7 @@ from typing import Any
 from flask import Flask, render_template, request, send_file, abort
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-GENERATOR_VERSION = '1.3.6'  # bump on meaningful generator changes
+GENERATOR_VERSION = '1.4.0'  # bump on meaningful generator changes
 
 app = Flask(__name__)
 
@@ -49,6 +49,31 @@ plugin_env = Environment(
 
 _SNAKE_RE = re.compile(r'^[a-z][a-z0-9_]*$')
 
+# -----------------------------------------------------------------------------
+# ad_break_scope — Provider/Distributor role split for Type 6 ad-break seg IDs.
+#
+# Per SCTE 35:
+#   Provider role    — 48/49 (Advertisement), 52/53 (Placement Opportunity),
+#                      56/57 (Overlay Placement Opportunity)
+#   Distributor role — 50/51 (Advertisement), 54/55 (Placement Opportunity),
+#                      58/59 (Overlay Placement Opportunity)
+#
+# 32/33 (Chapter) and 34/35 (Break) sit outside the role split and are
+# controlled independently.
+#
+# Two orthogonal axes:
+#   GEN-TIME (per-pair checkboxes)     — capability: which pairs the plugin's
+#                                        code knows about at all.
+#   RUNTIME (ad_break_scope in .conf)  — policy: which role's baked-in pairs
+#                                        are actually honored at fire site.
+# A pair must be baked in AND in-scope to fire. Pairs baked in but scope-
+# filtered emit an "observed but ignoring" log line for post-mortem visibility.
+# -----------------------------------------------------------------------------
+AD_BREAK_SCOPE_PROVIDER    = 'provider'
+AD_BREAK_SCOPE_DISTRIBUTOR = 'distributor'
+AD_BREAK_SCOPE_BOTH        = 'both'
+AD_BREAK_SCOPES = (AD_BREAK_SCOPE_PROVIDER, AD_BREAK_SCOPE_DISTRIBUTOR, AD_BREAK_SCOPE_BOTH)
+
 
 def snake_to_pascal(s: str) -> str:
     """
@@ -63,13 +88,26 @@ def snake_to_pascal(s: str) -> str:
     return ''.join(w.capitalize() for w in s.split('_') if w)
 
 
-def parse_methods_from_form(form) -> list[dict[str, str]]:
+def parse_methods_from_form(form) -> list[dict[str, Any]]:
     """
     Extract selected methods from POSTed form data.
 
     For the linear preset, also captures:
-        seg_id_pairs (list[tuple]) — which Type 6 seg_id pairs to handle.
-        Defaults to (34/35, 48/49, 54/55) if no pairs selected.
+        seg_id_pairs (list[tuple]) — which Type 6 seg_id pairs to bake into
+            the generated dispatch loop. Provider/Distributor split follows
+            SCTE 35; Chapter (32/33) and Break (34/35) sit outside the split.
+        ad_break_scope (str) — runtime filter honored inside the generated
+            plugin at fire-site dispatch. One of 'provider', 'distributor',
+            'both'. Composes with seg_id_pairs: pairs must be baked in AND
+            in-scope to actually fire.
+
+    Form field names are preset-suffixed (e.g. seg_pair_48_49_linear,
+    ad_break_scope_linear) so future presets — or a multi-linear expansion —
+    can add parallel controls without collisions.
+
+    Defaults if no pairs selected: 34/35 (Break) + 48/49 (Provider Ad) +
+    54/55 (Distributor Placement Opp), matching pre-v1.4 behavior.
+    Default scope: 'both'.
 
     Returns:
         list of {'preset', 'channel_group', 'name', ...} dicts.
@@ -86,24 +124,33 @@ def parse_methods_from_form(form) -> list[dict[str, str]]:
             )
         name_override = (form.get(f'method_name_{preset}') or '').strip()
         name = name_override or snake_to_pascal(channel_group)
-        entry = {
+        entry: dict[str, Any] = {
             'preset': preset,
             'channel_group': channel_group,
             'name': name,
         }
         if preset == 'linear':
             pairs = []
-            if form.get('seg_pair_32_33') == 'on':
+            # Outside the role split
+            if form.get('seg_pair_32_33_linear') == 'on':
                 pairs.append((32, 33, 'Chapter'))
-            if form.get('seg_pair_34_35') == 'on':
+            if form.get('seg_pair_34_35_linear') == 'on':
                 pairs.append((34, 35, 'Break'))
-            if form.get('seg_pair_48_49') == 'on':
+            # Provider role
+            if form.get('seg_pair_48_49_linear') == 'on':
                 pairs.append((48, 49, 'Provider Advertisement'))
-            if form.get('seg_pair_50_51') == 'on':
+            if form.get('seg_pair_52_53_linear') == 'on':
+                pairs.append((52, 53, 'Provider Placement Opportunity'))
+            if form.get('seg_pair_56_57_linear') == 'on':
+                pairs.append((56, 57, 'Provider Overlay Placement Opportunity'))
+            # Distributor role
+            if form.get('seg_pair_50_51_linear') == 'on':
                 pairs.append((50, 51, 'Distributor Advertisement'))
-            if form.get('seg_pair_54_55') == 'on':
+            if form.get('seg_pair_54_55_linear') == 'on':
                 pairs.append((54, 55, 'Distributor Placement Opportunity'))
-            # Default: 34/35 + 48/49 + 54/55 if nothing selected
+            if form.get('seg_pair_58_59_linear') == 'on':
+                pairs.append((58, 59, 'Distributor Overlay Placement Opportunity'))
+            # Default: 34/35 + 48/49 + 54/55 if nothing selected (pre-v1.4 baseline)
             if not pairs:
                 pairs = [
                     (34, 35, 'Break'),
@@ -111,6 +158,15 @@ def parse_methods_from_form(form) -> list[dict[str, str]]:
                     (54, 55, 'Distributor Placement Opportunity'),
                 ]
             entry['seg_id_pairs'] = pairs
+
+            # ad_break_scope — runtime filter, defaults to 'both' for back-compat.
+            scope = (form.get('ad_break_scope_linear') or AD_BREAK_SCOPE_BOTH).strip().lower()
+            if scope not in AD_BREAK_SCOPES:
+                raise ValueError(
+                    f'Invalid ad_break_scope for {preset}: {scope!r} — '
+                    f'must be one of {AD_BREAK_SCOPES}'
+                )
+            entry['ad_break_scope'] = scope
         methods.append(entry)
     return methods
 

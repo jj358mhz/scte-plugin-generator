@@ -117,6 +117,15 @@ SCTE_WAKEUP_ENABLED = {}   # allow_scte_wakeup: when True, Type 16 fires Content
 AD_SKIP_SPLICEINSERT = {}
 AD_SKIP_TIMESIGNAL = {}
 AD_BREAK_MODE = {}         # 'splice_insert' | 'time_signal' — mutually exclusive dispatch
+AD_BREAK_SCOPE = {}        # 'provider' | 'distributor' | 'both' — role filter for Type 6 ad-break seg IDs
+
+# SCTE 35 role-split seg-ID sets. Filters at fire-site dispatch in
+# _handle_time_signal_ad_breaks; scope is a runtime uplynk.conf value,
+# these sets are constants.
+PROVIDER_AD_SEG_IDS    = frozenset({48, 49, 52, 53, 56, 57})
+DISTRIBUTOR_AD_SEG_IDS = frozenset({50, 51, 54, 55, 58, 59})
+ROLE_TAGGED_AD_SEG_IDS = PROVIDER_AD_SEG_IDS | DISTRIBUTOR_AD_SEG_IDS
+ALL_AD_BREAK_SEG_IDS   = ROLE_TAGGED_AD_SEG_IDS | frozenset({32, 33, 34, 35})
 {% endif %}
 {% if 'boundary_handling' in features %}
 
@@ -656,6 +665,35 @@ def ad_break_mode(mode=None) -> str:
     except Exception as e:
         log(f'[upl-py_Err] ad_break_mode: {e}' + traceback.format_exc())
         return 'splice_insert'
+
+
+def ad_break_scope(scope=None) -> str:
+    """
+    Parse ad_break_scope. 'provider' | 'distributor' | 'both'.
+
+    Runtime role filter for Type 6 ad-break seg IDs. Composes with
+    ad_break_mode: only relevant when ad_break_mode='time_signal'.
+        provider    — honor 48/49, 52/53, 56/57 (Provider role pairs)
+        distributor — honor 50/51, 54/55, 58/59 (Distributor role pairs)
+        both        — honor all role-tagged pairs (back-compat default)
+
+    32/33 (Chapter) and 34/35 (Break) sit outside the role split and are
+    not affected by this filter — if baked into the plugin at gen time,
+    they fire regardless of scope.
+    """
+    global AD_BREAK_SCOPE
+    if scope in AD_BREAK_SCOPE:
+        return AD_BREAK_SCOPE[scope]
+    try:
+        value = str(SLICER_CONFIG_DICT.get('ad_break_scope', 'both')).strip().lower()
+        if value not in ('provider', 'distributor', 'both'):
+            log(f'[upl-py_Warn] ad_break_scope: unrecognized value {value!r}, defaulting to both')
+            value = 'both'
+        AD_BREAK_SCOPE[scope] = value
+        return value
+    except Exception as e:
+        log(f'[upl-py_Err] ad_break_scope: {e}' + traceback.format_exc())
+        return 'both'
 
 
 def ad_skip_spliceinsert(skip_flag=None) -> bool:

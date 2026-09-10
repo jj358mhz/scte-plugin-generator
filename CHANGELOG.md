@@ -21,6 +21,14 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.4.1] - 2026-09-09
+
+### Fixed
+- Rendered plugin: stray `)` after the `_handle_time_signal_ad_breaks(...)` call in the `command_type == 6` branch of `_method_linear.py.j2` caused `SyntaxError: unmatched ')'` on any plugin generated without the `boundary_handling` feature enabled. Plugins failed to load into the LiveSlicer runtime. Introduced in v1.4.0 during the `ad_break_scope` kwarg addition; every v1.4.0-generated plugin without boundary handling was affected. One-character delete; no behavior change to correctly-loading plugins.
+
+### Notes
+- Verification checklist for future releases now includes `ast.parse()` on rendered plugin output — catches this class of syntax bug in ~20ms per render.
+
 ## [1.4.0] - 2026-09-09
 
 ### Added

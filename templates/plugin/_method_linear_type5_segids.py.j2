@@ -7,16 +7,22 @@
 
   Delegates the def <name>() body to linear_method() in
   _method_linear_common.py.j2. Type 6 dispatch is identical to Standard
-  Linear; command_type == 5 dispatch is provided via {% call %} and
-  extended (in chunk 3) with a descriptor-driven branch on OON=0.
+  Linear; command_type == 5 dispatch is provided via {% call %}.
 
-  IMPORTANT — chunk 2 scaffold: the command_type == 5 branch below is
-  a byte-for-byte mirror of Standard Linear's OON-driven dispatch. The
-  descriptor-driven path lands in chunk 3.
+  Type 5 dispatch selector: outofnetwork_mode (runtime, uplynk.conf).
+    True/1  → OON path — reads out_of_network_indicator from the message,
+              uses splice_command.duration, pts_offset_500/501. Identical
+              to Standard Linear when its outofnetwork_mode is True.
+    False/0 → seg-ID path — reads segmentation_descriptors from the Type 5
+              command, runs the pair loop via _handle_time_signal_ad_breaks
+              (descriptor-container-agnostic), uses segmentation_duration
+              and pts_offset_<seg_id>. Honors ad_break_scope. Distinct from
+              Standard Linear, which log-and-skips its Type 5 branch in
+              this state.
 
   Context in scope from parent:
-    m.name           (str, PascalCase)  — function name
-    m.channel_group  (str, snake_case)  — dispatch key
+    m.name           (str, PascalCase)
+    m.channel_group  (str, snake_case)
     m.seg_id_pairs   (list[tuple])
     m.ad_break_scope (str)
     features         (set[str])
@@ -28,16 +34,16 @@
 # =============================================================================
 # Dispatch shape:
 #   command_type=6 → identical to Standard Linear.
-#   command_type=5 → OON=1: OON-driven (identical to Standard Linear).
-#                    OON=0: TODO chunk 3 — descriptor-driven seg-ID dispatch
-#                           against segmentation_descriptors on the Type 5
-#                           command. Currently mirrors Standard Linear
-#                           OON=0 → AdEnd behavior.
+#   command_type=5 → gated by outofnetwork_mode (uplynk.conf):
+#                    True  → OON-driven (Standard Linear semantics).
+#                    False → descriptor-driven seg-ID dispatch via
+#                            _handle_time_signal_ad_breaks against the
+#                            Type 5 command's descriptors. Uses
+#                            segmentation_duration and pts_offset_<seg_id>.
 
 {% call common.linear_method(m.name) %}
 # =================================================================
-# command_type=5 — SCAFFOLD (chunk 2): mirrors Standard Linear.
-# Chunk 3 will add descriptor-driven dispatch on the OON=0 branch.
+# command_type=5 — dispatch selector: outofnetwork_mode.
 # =================================================================
 if passthrough_mode:
     log(f'[upl-py_Mode] Passthrough mode set to {passthrough_mode}, '
@@ -58,15 +64,16 @@ elif in_blackout:
     log('[upl-py_Bo] In blackout, suppressing Type 5 ad break',
         command_type=command_type, call_sign=call_sign,
         stream_type=stream_type)
-else:
+elif outofnetwork_mode:
+    # OON path — identical to Standard Linear.
     command = slice_info.get('command', {})
     oon = command.get('out_of_network_indicator', 0)
     duration_flag = command.get('duration_flag', 0)
-    log(f'[upl-py_Meta] OON state: {oon}, duration_flag: {duration_flag}',
+    log(f'[upl-py_Meta] outofnetwork_mode=True, OON state: {oon}, '
+        f'duration_flag: {duration_flag}',
         command_type=command_type, oon=oon)
 
     if oon == 1:
-        # OON=1 → OON-driven dispatch (identical to Standard Linear).
         pts_offset = pts_off_x(501)
         base64_oon1 = slice_info.get('base64')
         base64_oon1_str = str(base64_oon1, 'utf-8') if base64_oon1 else ''
@@ -100,8 +107,6 @@ else:
                                int(duration + duration_offset))
 
     elif oon == 0:
-        # OON=0 → chunk 3 will branch here on descriptor presence.
-        # For now: mirror Standard Linear (unconditional AdEnd).
         pts_offset = pts_off_x(500)
         slicer.FlushBreakMeta(int(pts + pts_offset))
         log(f'[upl-py_Ad] OON=0 AdEnd at {pts + pts_offset} pts',
@@ -116,6 +121,41 @@ else:
             command_type=command_type, oon=oon,
             call_sign=call_sign, slicer_version=slicer_version,
             stream_type=stream_type)
+
+else:
+    # Descriptor-driven path — outofnetwork_mode=False.
+    # Extract descriptors from the Type 5 command and dispatch via the
+    # shared _handle_time_signal_ad_breaks helper. The helper is
+    # descriptor-container-agnostic — it operates on seg_type_list and
+    # descriptors regardless of whether they came from Type 5 or Type 6.
+    log(f'[upl-py_Meta] outofnetwork_mode=False, entering seg-ID dispatch '
+        f'on Type 5 descriptors',
+        command_type=command_type, call_sign=call_sign,
+        slicer_version=slicer_version, stream_type=stream_type)
+
+    descriptors = slice_info.get('descriptors', [])
+    if not descriptors:
+        log(f'[upl-py_Err] outofnetwork_mode=False but Type 5 command has '
+            f'no descriptors — cannot dispatch, taking no action',
+            command_type=command_type, call_sign=call_sign,
+            slicer_version=slicer_version, stream_type=stream_type)
+    else:
+        seg_type_list = []
+        for descriptor in descriptors:
+            if 'segmentation_type_id' in descriptor:
+                seg_type_list.append(descriptor['segmentation_type_id'])
+
+        _handle_time_signal_ad_breaks(
+            slice_info, slicer_id, seg_type_list, descriptors, pts,
+            call_sign=call_sign,
+            slicer_version=slicer_version,
+            stream_type=stream_type,
+            ad_scope=ad_scope,
+{% if 'boundary_handling' in features %}
+            use_boundary=use_boundary,
+            boundary_dur_max=boundary_dur_max,
+{% endif %}
+        )
 {% endcall %}
 
 

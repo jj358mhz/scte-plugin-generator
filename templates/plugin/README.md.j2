@@ -131,6 +131,12 @@ in the pair list above, they fire regardless of `ad_break_scope`.
 `[upl-py_Mode] ad_break_scope=<x>, observed but ignoring out-of-scope seg_ids:`
 log line, so you can see whether a feed is sending role-mismatched signals.
 
+🚦 **`outofnetwork_mode` in `uplynk.conf`** — this key gates Type 5 dispatch.
+Set to `1` for normal OON-driven Type 5 handling (AdStart on OON=1, AdEnd
+on OON=0). Set to `0` to log-and-skip all Type 5 messages. Default in the
+generated conf is `0` — flip to `1` before deploying if your feed uses
+Type 5 splice_insert for ad breaks.
+
 ✅ Use this preset for standard commercial broadcast feeds where every SCTE-35
 message is a straightforward break signal.
 
@@ -144,16 +150,26 @@ inside `splice_insert` (Type 5) commands rather than the conventional
 
 📢 Dispatch shape on `command_type == 5`:
 
-- 🔀 **OON=1** → OON-driven dispatch, identical to Standard Linear
-  (`splice_command.duration` if `duration_flag=1`, open-ended `AdStart` if `duration_flag=0`).
-- 🔀 **OON=0** *(chunk 3 — not yet implemented)* → will read
-  `segmentation_descriptor` pairs and run the seg-ID loop with
-  `segmentation_duration` from the descriptor, honoring `ad_break_scope`.
-  Currently mirrors Standard Linear's `OON=0 → AdEnd` behavior.
+The runtime config key `outofnetwork_mode` in `uplynk.conf` selects which
+dispatch path this preset uses for Type 5:
 
-`command_type == 6` handling is identical to Standard Linear — the seg-ID
-pairs and `ad_break_scope` filter apply to Type 6 messages just as they
-would in `linear`.
+| `outofnetwork_mode` | Type 5 dispatch |
+|---|---|
+| `1` (True) | **OON path** — reads `out_of_network_indicator` from the message. `OON=1` → `AdStart` with `pts_offset_501` and `splice_command.duration`. `OON=0` → `AdEnd` with `pts_offset_500`. Identical to Standard Linear's Type 5 branch when its `outofnetwork_mode` is also True. Descriptors ignored. |
+| `0` (False) | **Seg-ID path** — reads `segmentation_descriptors` from the Type 5 command and runs the pair loop, using `pts_offset_<seg_id>`, `duration_offset_<seg_id>`, and `segmentation_duration` from each descriptor. Honors `ad_break_scope`. The `out_of_network_indicator` field is not consulted. If no descriptors are present on the Type 5 command, logs and takes no action. |
+
+🎛️ **Current build defaults to:** `ad_break_scope: {% for m in methods if m.preset == 'linear_type5_segids' %}{{ m.ad_break_scope }}{% endfor %}`
+
+⚠️ **`outofnetwork_mode` defaults to `0` in the generated `uplynk.conf` for
+this preset.** If you want OON-style Type 5 handling instead, set it to `1`
+before deploying. QA every conf change against the encoder's actual signaling
+before launch.
+
+`command_type == 6` handling is identical to Standard Linear — the same
+seg-ID pairs bake into the pair loop and the `ad_break_scope` filter applies
+to Type 6 messages just as they would in `linear`.
+
+📋 **Baked-in seg-ID pairs** (fire on both Type 5 seg-ID path and Type 6):
 
 {% for m in methods if m.preset == 'linear_type5_segids' %}
 {% for pair in m.seg_id_pairs %}
@@ -161,13 +177,13 @@ would in `linear`.
 {% endfor %}
 {% endfor %}
 
-🎛️ **Current build defaults to:** `ad_break_scope: {% for m in methods if m.preset == 'linear_type5_segids' %}{{ m.ad_break_scope }}{% endfor %}`
-
 ⚠️ **Do not select both `linear` and `linear_type5_segids` in the same plugin
 unless you know why.** They share every runtime config key (see
 `Linear / LinearType5SegIds preset config` section in `uplynk.conf`).
 Selecting both makes sense only when different slicers driven by the same
-plugin binary use different `channel_group` values.
+plugin binary use different `channel_group` values. Note that the
+`outofnetwork_mode` semantics differ between the two presets — see the
+Linear section above for its behavior there.
 
 {% endif %}
 {% if has_live_event %}

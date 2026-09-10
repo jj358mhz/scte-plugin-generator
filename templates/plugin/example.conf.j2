@@ -119,6 +119,18 @@ channel_group: {{ methods | selectattr('preset', 'equalto', 'scte_logger') | map
 # method the slicer's channel_group dispatches to.
 # -----------------------------------------------------------------------------
 {% if has_linear or has_linear_type5_segids %}
+# outofnetwork_mode: gates Type 5 (splice_insert) dispatch. Semantics differ
+# by preset — one config key, two meanings on the OFF side:
+#   Standard Linear (`linear`):
+#     1 → process Type 5 via OON path (out_of_network_indicator drives AdStart/AdEnd)
+#     0 → log-and-skip all Type 5 messages
+#   LinearType5SegIds (`linear_type5_segids`):
+#     1 → process Type 5 via OON path (same as Standard Linear)
+#     0 → process Type 5 via segmentation_descriptor pair loop (seg-ID dispatch),
+#         reading segmentation_duration from the descriptor and honoring ad_break_scope
+# Default 0 preserves the LinearType5SegIds intent (chose the preset for seg-ID
+# dispatch). If this plugin has the `linear` preset selected and you want its
+# Type 5 branch to fire, set this to 1 before deploying.
 outofnetwork_mode: 0
 local_mode: national
 passthrough_mode: 0
@@ -154,7 +166,7 @@ pts_offset_500: 0
 pts_offset_501: 0
 duration_offset_501: 0
 {% else %}
-# outofnetwork_mode: 0
+# outofnetwork_mode: 0     # 1=OON dispatch, 0=preset-dependent (see Linear section above)
 # local_mode: national
 # passthrough_mode: 0
 # program_start_via_scte_mode: 1

@@ -21,6 +21,30 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.5.0] - 2026-09-09
+
+### Added
+- New preset: `linear_type5_segids`. Generates a `LinearType5SegIds` method for operators whose encoder emits `segmentation_descriptor` pairs inside `splice_insert` (Type 5) commands rather than the conventional `time_signal` (Type 6) carriage. Uncommon but SCTE-35-conformant; customer-driven addition. Type 6 dispatch identical to Standard Linear; Type 5 dispatch selected at runtime by `outofnetwork_mode` in `uplynk.conf`. When `outofnetwork_mode=1`, Type 5 dispatches via the OON path (identical to Standard Linear semantics). When `outofnetwork_mode=0`, Type 5 dispatches via `_handle_time_signal_ad_breaks` against the Type 5 command's descriptors, using `segmentation_duration` and `pts_offset_<seg_id>`, honoring `ad_break_scope`. The two presets share every runtime config key — one `uplynk.conf` serves whichever method the slicer's `channel_group` dispatches to.
+- New template file: `_method_linear_common.py.j2`. Two Jinja macros extracted from what was 609 lines of duplicated Linear-family method body. `linear_method(method_name)` renders the `def <name>(...)` body with `command_type == 5` as a `{% call %}` variance point; `linear_helpers()` renders the module-level `_handle_time_signal_ad_breaks` helper. `_method_linear.py.j2` and `_method_linear_type5_segids.py.j2` are thin child templates that provide their preset-specific Type 5 dispatch inline. `_handle_time_signal_ad_breaks` is descriptor-container-agnostic — it operates on `seg_type_list` and `descriptors` regardless of whether they came from Type 5 or Type 6, enabling zero-code reuse across the two presets.
+- New form UX: LinearType5SegIds method card in `form.html`, positioned between Standard Linear and Live Event. All form field names suffixed `_linear_type5_segids` (matching the preset-suffix convention established in v1.4.0) for clean multi-instance expansion in v1.6.0+.
+- `outofnetwork_mode` config key now gates Type 5 dispatch in **both** Linear-family presets. Was metadata-only before v1.5.0 (parsed, logged, passed as `MetaMetadata`, but not consulted for dispatch). In Standard Linear, `outofnetwork_mode=0` now log-and-skips all Type 5 messages; `outofnetwork_mode=1` restores prior behavior. In LinearType5SegIds, `outofnetwork_mode=0` selects the descriptor-driven path; `outofnetwork_mode=1` selects the OON path.
+
+### Changed
+- `example.conf.j2`: Linear preset config section renamed to "Linear / LinearType5SegIds preset config" and gated on `has_linear or has_linear_type5_segids`. Both presets emit into the same conf block since they share every runtime knob. Pair offset emission (`pts_offset_<start>`, `pts_offset_<end>`, `duration_offset_<start>`) deduplicates across both presets using a Jinja `_seen_pairs` accumulator — if both presets select the same seg-ID pair, its offsets emit once, not twice.
+- `example.conf.j2`: added multi-line comment block above `outofnetwork_mode: 0` documenting its now-active preset-dependent semantics.
+- `README.md.j2`: Standard Linear section adds a 🚦 callout describing `outofnetwork_mode`'s new dispatch-gate role. New `linear_type5_segids` section describes the two dispatch paths in a table (OON path vs. seg-ID path), lists baked-in pairs, notes the `outofnetwork_mode: 0` default choice, and warns operators about selecting both Linear-family presets in one plugin (config-key semantic differs across the two).
+- `snake_to_pascal()` in `app.py`: no code change, but `LinearType5Segids` (rather than `LinearType5SegIds`) is the default method name for the new preset. Operators wanting `SegIds` casing use the "method name override" form field — same escape hatch that already exists for acronyms (CBS, NBC).
+
+### Fixed
+- Rendered plugin: `global ZERO_DUR_PAIRS` inside `_handle_time_signal_ad_breaks` was indented 8 spaces where the function body is at 4, producing `IndentationError: unexpected indent` on any generated plugin that reached that line at runtime. Introduced in v1.4.0 and invisible in that release because the v1.4.0 paren bug fixed in v1.4.1 short-circuited parsing before reaching this line. Detected during v1.5.0's chunk-1 refactor via `ast.parse()` on rendered output.
+
+### Notes
+- **Back-compat break for Standard Linear**: `outofnetwork_mode` was metadata-only in v1.4.x; v1.5.0 makes it a real gate. Generated plugins whose `uplynk.conf` has `outofnetwork_mode: 0` (the generator default) will now log-and-skip all Type 5 messages. Deployed customers upgrading Standard Linear from v1.4.x to v1.5.0 must set `outofnetwork_mode: 1` in `uplynk.conf` before restarting the slicer. Not a footgun in the maintainer's workflow (one slicer, one conf, one operator, QA before launch) but every operator regenerating in v1.5.0 needs to know.
+- Two Linear-family presets share runtime config surface intentionally. `channel_group` in `uplynk.conf` picks which method actually dispatches at runtime; the shared config keys just mean the same conf file serves either method. Multi-linear support (allowing multiple named Linear methods with per-method configs — LinearCBS, LinearNBC, etc.) moves from v1.5.0 backlog to v1.6.0+.
+- v1.4.2 backlog: remove dead `local_mode` code (helper defined but never called; config key silently no-op).
+- v1.4.3 backlog: gate unselected preset sections out of generated `uplynk.conf`.
+- Verification checklist for future releases: `ast.parse()` on rendered plugin output in every feature/preset combination. Catches the class of bug behind v1.4.1 hotfix and this release's `global` indent fix in ~20ms per render.
+
 ## [1.4.1] - 2026-09-09
 
 ### Fixed

@@ -59,6 +59,11 @@ elif in_blackout:
     log('[upl-py_Bo] In blackout, suppressing Type 5 ad break',
         command_type=command_type, call_sign=call_sign,
         stream_type=stream_type)
+elif not outofnetwork_mode:
+    log(f'[upl-py_Mode] outofnetwork_mode set to {outofnetwork_mode}, '
+        f'skip processing Type 5 splice_insert',
+        command_type=command_type, call_sign=call_sign,
+        slicer_version=slicer_version, stream_type=stream_type)
 else:
     command = slice_info.get('command', {})
     oon = command.get('out_of_network_indicator', 0)

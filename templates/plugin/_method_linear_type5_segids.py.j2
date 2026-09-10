@@ -1,0 +1,122 @@
+{#-
+  _method_linear_type5_segids.py.j2 — LinearType5SegIds channel-group method.
+
+  Rendered when m.preset == 'linear_type5_segids'. For operators whose
+  encoder emits segmentation_descriptors on Type 5 (splice_insert)
+  commands instead of the conventional Type 6 (time_signal) carriage.
+
+  Delegates the def <name>() body to linear_method() in
+  _method_linear_common.py.j2. Type 6 dispatch is identical to Standard
+  Linear; command_type == 5 dispatch is provided via {% call %} and
+  extended (in chunk 3) with a descriptor-driven branch on OON=0.
+
+  IMPORTANT — chunk 2 scaffold: the command_type == 5 branch below is
+  a byte-for-byte mirror of Standard Linear's OON-driven dispatch. The
+  descriptor-driven path lands in chunk 3.
+
+  Context in scope from parent:
+    m.name           (str, PascalCase)  — function name
+    m.channel_group  (str, snake_case)  — dispatch key
+    m.seg_id_pairs   (list[tuple])
+    m.ad_break_scope (str)
+    features         (set[str])
+    client_name      (str)
+-#}
+{% import '_method_linear_common.py.j2' as common with context %}
+# =============================================================================
+# {{ m.name }} — `linear_type5_segids` preset channel-group method
+# =============================================================================
+# Dispatch shape:
+#   command_type=6 → identical to Standard Linear.
+#   command_type=5 → OON=1: OON-driven (identical to Standard Linear).
+#                    OON=0: TODO chunk 3 — descriptor-driven seg-ID dispatch
+#                           against segmentation_descriptors on the Type 5
+#                           command. Currently mirrors Standard Linear
+#                           OON=0 → AdEnd behavior.
+
+{% call common.linear_method(m.name) %}
+# =================================================================
+# command_type=5 — SCAFFOLD (chunk 2): mirrors Standard Linear.
+# Chunk 3 will add descriptor-driven dispatch on the OON=0 branch.
+# =================================================================
+if passthrough_mode:
+    log(f'[upl-py_Mode] Passthrough mode set to {passthrough_mode}, '
+        f'skip processing all ad breaks',
+        command_type=command_type, call_sign=call_sign,
+        slicer_version=slicer_version, stream_type=stream_type)
+elif skip_splice:
+    log(f'[upl-py_Mode] ad_skip_spliceinsert set to {skip_splice}, '
+        f'skip processing splice_insert ad breaks',
+        command_type=command_type, call_sign=call_sign,
+        slicer_version=slicer_version, stream_type=stream_type)
+elif ad_mode != 'splice_insert':
+    log(f'[upl-py_Mode] ad_break_mode={ad_mode}, observing but '
+        f'ignoring Type 5 splice_insert',
+        command_type=command_type, call_sign=call_sign,
+        stream_type=stream_type)
+elif in_blackout:
+    log('[upl-py_Bo] In blackout, suppressing Type 5 ad break',
+        command_type=command_type, call_sign=call_sign,
+        stream_type=stream_type)
+else:
+    command = slice_info.get('command', {})
+    oon = command.get('out_of_network_indicator', 0)
+    duration_flag = command.get('duration_flag', 0)
+    log(f'[upl-py_Meta] OON state: {oon}, duration_flag: {duration_flag}',
+        command_type=command_type, oon=oon)
+
+    if oon == 1:
+        # OON=1 → OON-driven dispatch (identical to Standard Linear).
+        pts_offset = pts_off_x(501)
+        base64_oon1 = slice_info.get('base64')
+        base64_oon1_str = str(base64_oon1, 'utf-8') if base64_oon1 else ''
+
+        if duration_flag == 0:
+            log(f'[upl-py_Ad] From OON=1, open-ended AdStart at '
+                f'{pts + pts_offset} pts',
+                command_type=command_type, oon=1,
+                call_sign=call_sign, slicer_version=slicer_version,
+                stream_type=stream_type)
+            slicer.AdMeta('base64_oon1', base64_oon1_str)
+            slicer.AdStart(int(pts + pts_offset))
+        else:
+            raw_duration = command.get('duration', 0)
+            if raw_duration == 0:
+                log(f'[upl-py_Err] From OON=1, duration_flag=1 but '
+                    f'duration=0 — refusing AdStart(pts, 0). Skipping.',
+                    command_type=command_type, oon=1,
+                    call_sign=call_sign, slicer_version=slicer_version,
+                    stream_type=stream_type)
+            else:
+                duration = break_dur_oon(slice_info)
+                duration_offset = dur_off_x(501)
+                log(f'[upl-py_Ad] From OON=1, AdStart at {pts + pts_offset} pts '
+                    f'for {adis(duration, duration_offset)}s',
+                    command_type=command_type, oon=1,
+                    call_sign=call_sign, slicer_version=slicer_version,
+                    stream_type=stream_type)
+                slicer.AdMeta('base64_oon1', base64_oon1_str)
+                slicer.AdStart(int(pts + pts_offset),
+                               int(duration + duration_offset))
+
+    elif oon == 0:
+        # OON=0 → chunk 3 will branch here on descriptor presence.
+        # For now: mirror Standard Linear (unconditional AdEnd).
+        pts_offset = pts_off_x(500)
+        slicer.FlushBreakMeta(int(pts + pts_offset))
+        log(f'[upl-py_Ad] OON=0 AdEnd at {pts + pts_offset} pts',
+            command_type=command_type, oon=0,
+            call_sign=call_sign, slicer_version=slicer_version,
+            stream_type=stream_type)
+        slicer.AdEnd(int(pts + pts_offset))
+
+    else:
+        log(f'[upl-py_Err] Warning: unexpected out_of_network_indicator '
+            f'value: {oon}, taking no action',
+            command_type=command_type, oon=oon,
+            call_sign=call_sign, slicer_version=slicer_version,
+            stream_type=stream_type)
+{% endcall %}
+
+
+{{ common.linear_helpers() }}

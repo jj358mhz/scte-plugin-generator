@@ -113,9 +113,12 @@ channel_group: {{ methods | selectattr('preset', 'equalto', 'scte_logger') | map
 {% endif %}
 
 # -----------------------------------------------------------------------------
-# Linear preset config
+# Linear / LinearType5SegIds preset config
+#
+# Both presets share the same runtime knobs — one uplynk.conf serves whichever
+# method the slicer's channel_group dispatches to.
 # -----------------------------------------------------------------------------
-{% if has_linear %}
+{% if has_linear or has_linear_type5_segids %}
 outofnetwork_mode: 0
 local_mode: national
 passthrough_mode: 0
@@ -127,7 +130,7 @@ scte_ad_break_mode: splice_insert
 #   both        — honor all role-tagged pairs (default)
 # 32/33 (Chapter) and 34/35 (Break) are outside the split and always fire
 # if baked into the plugin at generation time.
-ad_break_scope: {{ methods | selectattr('preset', 'equalto', 'linear') | map(attribute='ad_break_scope') | first }}
+ad_break_scope: {{ (methods | selectattr('preset', 'in', ['linear', 'linear_type5_segids']) | map(attribute='ad_break_scope') | list | first) or 'both' }}
 ad_skip_spliceinsert: 0
 ad_skip_timesignal: 0
 
@@ -135,12 +138,14 @@ ad_skip_timesignal: 0
 pts_offset_16: 0
 
 # Per-pair timing offsets (seconds, float) — one set per selected seg pair
-{% for m in methods if m.preset == 'linear' %}
-{% for pair in m.seg_id_pairs %}
+{% set _seen_pairs = [] %}
+{% for m in methods if m.preset in ['linear', 'linear_type5_segids'] %}
+{% for pair in m.seg_id_pairs if pair[0] not in _seen_pairs %}
 # {{ pair[2] }} — Type {{ pair[0] }}/{{ pair[1] }}
 pts_offset_{{ pair[0] }}: 0
 pts_offset_{{ pair[1] }}: 0
 duration_offset_{{ pair[0] }}: 0
+{% if _seen_pairs.append(pair[0]) %}{% endif %}
 {% endfor %}
 {% endfor %}
 

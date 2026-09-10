@@ -1221,6 +1221,8 @@ def Process35(slice_info: slicer.SliceInfo) -> int:
 {% for m in methods %}
 {% if m.preset == 'linear' %}
 {% include '_method_linear.py.j2' %}
+{% elif m.preset == 'linear_type5_segids' %}
+{% include '_method_linear_type5_segids.py.j2' %}
 {% elif m.preset == 'live_event' %}
 {% include '_method_live_event.py.j2' %}
 {% elif m.preset == 'scte_logger' %}

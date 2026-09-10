@@ -17,7 +17,7 @@ from typing import Any
 from flask import Flask, render_template, request, send_file, abort
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-GENERATOR_VERSION = '1.4.1'  # bump on meaningful generator changes
+GENERATOR_VERSION = '1.5.0'  # bump on meaningful generator changes
 
 app = Flask(__name__)
 
@@ -113,7 +113,7 @@ def parse_methods_from_form(form) -> list[dict[str, Any]]:
         list of {'preset', 'channel_group', 'name', ...} dicts.
     """
     methods = []
-    for preset in ('linear', 'live_event', 'scte_logger'):
+    for preset in ('linear', 'linear_type5_segids', 'live_event', 'scte_logger'):
         if form.get(f'include_{preset}') != 'on':
             continue
         channel_group = (form.get(f'channel_group_{preset}') or preset).strip()
@@ -129,26 +129,27 @@ def parse_methods_from_form(form) -> list[dict[str, Any]]:
             'channel_group': channel_group,
             'name': name,
         }
-        if preset == 'linear':
+        if preset in ('linear', 'linear_type5_segids'):
+            _suffix = preset  # form field suffix — 'linear' or 'linear_type5_segids'
             pairs = []
             # Outside the role split
-            if form.get('seg_pair_32_33_linear') == 'on':
+            if form.get(f'seg_pair_32_33_{_suffix}') == 'on':
                 pairs.append((32, 33, 'Chapter'))
-            if form.get('seg_pair_34_35_linear') == 'on':
+            if form.get(f'seg_pair_34_35_{_suffix}') == 'on':
                 pairs.append((34, 35, 'Break'))
             # Provider role
-            if form.get('seg_pair_48_49_linear') == 'on':
+            if form.get(f'seg_pair_48_49_{_suffix}') == 'on':
                 pairs.append((48, 49, 'Provider Advertisement'))
-            if form.get('seg_pair_52_53_linear') == 'on':
+            if form.get(f'seg_pair_52_53_{_suffix}') == 'on':
                 pairs.append((52, 53, 'Provider Placement Opportunity'))
-            if form.get('seg_pair_56_57_linear') == 'on':
+            if form.get(f'seg_pair_56_57_{_suffix}') == 'on':
                 pairs.append((56, 57, 'Provider Overlay Placement Opportunity'))
             # Distributor role
-            if form.get('seg_pair_50_51_linear') == 'on':
+            if form.get(f'seg_pair_50_51_{_suffix}') == 'on':
                 pairs.append((50, 51, 'Distributor Advertisement'))
-            if form.get('seg_pair_54_55_linear') == 'on':
+            if form.get(f'seg_pair_54_55_{_suffix}') == 'on':
                 pairs.append((54, 55, 'Distributor Placement Opportunity'))
-            if form.get('seg_pair_58_59_linear') == 'on':
+            if form.get(f'seg_pair_58_59_{_suffix}') == 'on':
                 pairs.append((58, 59, 'Distributor Overlay Placement Opportunity'))
             # Default: 34/35 + 48/49 + 54/55 if nothing selected (pre-v1.4 baseline)
             if not pairs:
@@ -160,7 +161,7 @@ def parse_methods_from_form(form) -> list[dict[str, Any]]:
             entry['seg_id_pairs'] = pairs
 
             # ad_break_scope — runtime filter, defaults to 'both' for back-compat.
-            scope = (form.get('ad_break_scope_linear') or AD_BREAK_SCOPE_BOTH).strip().lower()
+            scope = (form.get(f'ad_break_scope_{_suffix}') or AD_BREAK_SCOPE_BOTH).strip().lower()
             if scope not in AD_BREAK_SCOPES:
                 raise ValueError(
                     f'Invalid ad_break_scope for {preset}: {scope!r} — '
@@ -213,6 +214,7 @@ def build_context(form) -> dict[str, Any]:
         'methods':       methods,
         'features':      features,
         'has_linear':      any(m['preset'] == 'linear'      for m in methods),
+        'has_linear_type5_segids': any(m['preset'] == 'linear_type5_segids' for m in methods),
         'has_live_event':  any(m['preset'] == 'live_event'  for m in methods),
         'has_oon':         False,  # oon preset removed from form; scaffolding kept dormant for future
         'has_scte_logger': any(m['preset'] == 'scte_logger' for m in methods),
@@ -275,7 +277,7 @@ def generate():
 
 @app.route('/healthz', methods=['GET'])
 def healthz():
-    """Liveness probe for Portainer/Caddy healthchecks."""
+    """Liveness probe for Portainer/Caddy health checks."""
     return {'status': 'ok', 'generator_version': GENERATOR_VERSION}, 200
 
 

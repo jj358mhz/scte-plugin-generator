@@ -135,6 +135,41 @@ log line, so you can see whether a feed is sending role-mismatched signals.
 message is a straightforward break signal.
 
 {% endif %}
+{% if has_linear_type5_segids %}
+### 📼 `linear_type5_segids` &rarr; `{% for m in methods if m.preset == 'linear_type5_segids' %}{{ m.name }}{% endfor %}()`
+
+Variant of `linear` for encoders that emit `segmentation_descriptor` pairs
+inside `splice_insert` (Type 5) commands rather than the conventional
+`time_signal` (Type 6) carriage. Uncommon but SCTE-35-conformant.
+
+📢 Dispatch shape on `command_type == 5`:
+
+- 🔀 **OON=1** → OON-driven dispatch, identical to Standard Linear
+  (`splice_command.duration` if `duration_flag=1`, open-ended `AdStart` if `duration_flag=0`).
+- 🔀 **OON=0** *(chunk 3 — not yet implemented)* → will read
+  `segmentation_descriptor` pairs and run the seg-ID loop with
+  `segmentation_duration` from the descriptor, honoring `ad_break_scope`.
+  Currently mirrors Standard Linear's `OON=0 → AdEnd` behavior.
+
+`command_type == 6` handling is identical to Standard Linear — the seg-ID
+pairs and `ad_break_scope` filter apply to Type 6 messages just as they
+would in `linear`.
+
+{% for m in methods if m.preset == 'linear_type5_segids' %}
+{% for pair in m.seg_id_pairs %}
+- 🔢 Type `{{ pair[0] }}` / `{{ pair[1] }}` &mdash; {{ pair[2] }}
+{% endfor %}
+{% endfor %}
+
+🎛️ **Current build defaults to:** `ad_break_scope: {% for m in methods if m.preset == 'linear_type5_segids' %}{{ m.ad_break_scope }}{% endfor %}`
+
+⚠️ **Do not select both `linear` and `linear_type5_segids` in the same plugin
+unless you know why.** They share every runtime config key (see
+`Linear / LinearType5SegIds preset config` section in `uplynk.conf`).
+Selecting both makes sense only when different slicers driven by the same
+plugin binary use different `channel_group` values.
+
+{% endif %}
 {% if has_live_event %}
 ### 🎥 `live_event` &rarr; `{% for m in methods if m.preset == 'live_event' %}{{ m.name }}{% endfor %}()`
 

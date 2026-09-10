@@ -180,6 +180,101 @@
                     </div>
                 </label>
 
+                {# --- Linear (Type 5 seg-IDs) method --- #}
+                <label class="method-card">
+                    <input type="checkbox" name="include_linear_type5_segids" value="on" class="method-check">
+                    <div class="method-header">
+                        <span class="method-title">Linear (Type 5 seg-IDs)</span>
+                        <span class="method-tag">linear_type5_segids</span>
+                    </div>
+                    <p class="method-desc">
+                        Variant of Linear for encoders that emit
+                        <code>segmentation_descriptor</code> pairs inside
+                        <code>splice_insert</code> (Type 5) commands rather than the
+                        conventional <code>time_signal</code> (Type 6) carriage. On
+                        Type 5 with OON=1, dispatches OON-style like Standard Linear;
+                        on OON=0 or absent, reads descriptors and dispatches the
+                        seg-ID pair loop. Type 6 handling identical to Standard Linear.
+                    </p>
+                    <div class="method-fields">
+                        <div class="field">
+                            <label>channel_group</label>
+                            <input type="text" name="channel_group_linear_type5_segids"
+                                   pattern="[a-z][a-z0-9_]*" value="linear_type5_segids">
+                        </div>
+                        <div class="field">
+                            <label>method name override</label>
+                            <input type="text" name="method_name_linear_type5_segids"
+                                   pattern="[A-Z][A-Za-z0-9]*" placeholder="LinearType5SegIds">
+                        </div>
+                    </div>
+                    <div class="method-options">
+                        <div class="options-label">Runtime role scope
+                            (<code>ad_break_scope</code>)</div>
+                        <div class="options-chips">
+                            <label class="chip">
+                                <input type="radio" name="ad_break_scope_linear_type5_segids"
+                                       value="provider">
+                                <span>Provider (network operator)</span>
+                            </label>
+                            <label class="chip">
+                                <input type="radio" name="ad_break_scope_linear_type5_segids"
+                                       value="distributor">
+                                <span>Distributor (affiliate / MVPD)</span>
+                            </label>
+                            <label class="chip">
+                                <input type="radio" name="ad_break_scope_linear_type5_segids"
+                                       value="both" checked>
+                                <span>Both (default)</span>
+                            </label>
+                        </div>
+
+                        <div class="options-label">Seg-ID pairs to bake in — outside role split</div>
+                        <div class="options-chips">
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_32_33_linear_type5_segids" value="on">
+                                <span>32/33 Chapter</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_34_35_linear_type5_segids" value="on" checked>
+                                <span>34/35 Break</span>
+                            </label>
+                        </div>
+
+                        <div class="options-label">Seg-ID pairs to bake in — Provider role</div>
+                        <div class="options-chips">
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_48_49_linear_type5_segids" value="on" checked>
+                                <span>48/49 Advertisement</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_52_53_linear_type5_segids" value="on">
+                                <span>52/53 Placement Opportunity</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_56_57_linear_type5_segids" value="on">
+                                <span>56/57 Overlay Placement Opp.</span>
+                            </label>
+                        </div>
+
+                        <div class="options-label">Seg-ID pairs to bake in — Distributor role</div>
+                        <div class="options-chips">
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_50_51_linear_type5_segids" value="on">
+                                <span>50/51 Advertisement</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_54_55_linear_type5_segids" value="on" checked>
+                                <span>54/55 Placement Opportunity</span>
+                            </label>
+                            <label class="chip">
+                                <input type="checkbox" name="seg_pair_58_59_linear_type5_segids" value="on">
+                                <span>58/59 Overlay Placement Opp.</span>
+                            </label>
+                        </div>
+                    </div>
+                </label>
+
                 {# --- Live Event method --- #}
                 <label class="method-card">
                     <input type="checkbox" name="include_live_event" value="on" class="method-check">

@@ -108,8 +108,8 @@ SCTE_LOG_VERBOSITY = '2'
 PLUGIN_MEMORY_LOGGING = False
 ZERO_DUR_PAIRS = set()  # (start_id, end_id) tuples whose last START had duration=0
 
-{% if has_linear %}
-# --- 5a. `linear` preset state ---
+{% if has_linear or has_linear_type5_segids %}
+# --- 5a. Linear-family preset state (linear / linear_type5_segids) ---
 OUTOFNETWORK_MODE = {}
 PROGRAM_START_VIA_SCTE_MODE = {}
 LOCAL_MODE = {}
@@ -592,9 +592,9 @@ def boundary_name_for(seg_id) -> str:
         return BOUNDARY_MODE.get('boundary_name_oon') or f'boundary_{seg_id}'
     return f'boundary_{seg_id}'
 {% endif %}
-{% if has_linear %}
+{% if has_linear or has_linear_type5_segids %}
 # -----------------------------------------------------------------------------
-# Linear preset parsers
+# Linear-family preset parsers (linear / linear_type5_segids)
 # -----------------------------------------------------------------------------
 
 def oon_mode(outofnetwork_mode=None) -> bool:

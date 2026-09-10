@@ -21,6 +21,15 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.5.1] - 2026-09-10
+
+### Fixed
+- Rendered plugin: LinearType5SegIds method threw `NameError` on first SCTE-35 message when the plugin was generated with only the `linear_type5_segids` preset selected (no `linear` preset). Root cause: two `{% if has_linear %}` blocks in `scte_plugin.py.j2` — the Linear-family module-level state (OUTOFNETWORK_MODE, AD_BREAK_SCOPE, PROVIDER_AD_SEG_IDS, etc.) and the Linear-family config parser functions (oon_mode, ad_break_mode, ad_break_scope, ad_skip_spliceinsert, ad_skip_timesignal) — were gated on Standard Linear presence only. When only `linear_type5_segids` was selected, both blocks were skipped and the generated `LinearType5SegIds` method referenced undefined names at runtime. Fixed by widening both gates to `{% if has_linear or has_linear_type5_segids %}`. Plugin still parsed cleanly because Python resolves function/name references at call time, not at module load — the failure only manifested when a real SCTE-35 message arrived.
+
+### Notes
+- Verification gap that caused this to ship: `ast.parse()` catches syntax errors but not name-resolution errors. A future check worth adding to the workflow: after generation, `python3 -c "import scte_<name>"` (or equivalent) to force the module through Python's import machinery. That still won't catch NameErrors inside function bodies (they're only resolved at call time), but would catch top-level references. A truly runtime-complete check requires calling the method with a fake `slice_info` — deferred to v1.6.x backlog.
+- WMA production plugin at v0.0.5 (customer WMA, generated 2026-09-10) is affected. Regenerate with v1.5.1 and redeploy immediately.
+
 ## [1.5.0] - 2026-09-09
 
 ### Added

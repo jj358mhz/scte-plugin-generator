@@ -360,6 +360,12 @@ def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
                 segmentation_type_id=start_id, call_sign=call_sign,
                 slicer_version=slicer_version, stream_type=stream_type)
 
+            # Attach base64 SCTE payload as AdMeta for downstream forensics.
+            # Key pattern base64_<seg_id> matches legacy plugin convention.
+            base64_bytes = slice_info.get('base64')
+            base64_str = base64_bytes.decode('utf-8') if base64_bytes else ''
+            slicer.AdMeta(f'base64_{start_id}', base64_str)
+
 {% if 'boundary_handling' in features %}
             if use_boundary:
                 boundary_name = boundary_name_for(start_id)
@@ -412,6 +418,11 @@ def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
                 f'at {pts + pts_offset} pts upid={upid}',
                 segmentation_type_id=end_id, call_sign=call_sign,
                 slicer_version=slicer_version, stream_type=stream_type)
+
+            # Attach base64 SCTE payload as AdMeta for downstream forensics.
+            base64_bytes = slice_info.get('base64')
+            base64_str = base64_bytes.decode('utf-8') if base64_bytes else ''
+            slicer.AdMeta(f'base64_{end_id}', base64_str)
 
 {% if 'boundary_handling' in features %}
             if use_boundary:

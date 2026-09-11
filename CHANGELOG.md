@@ -21,6 +21,17 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.5.2] - 2026-09-10
+
+### Fixed
+- Rendered plugin: seg-ID ad-break dispatch in `_handle_time_signal_ad_breaks` fired `AdStart` / `AdEnd` without attaching the triggering SCTE-35 base64 payload as `AdMeta`. Downstream forensics couldn't correlate ads to their source SCTE messages when dispatch went through the seg-ID path (Standard Linear Type 6, LinearType5SegIds Type 5 with `outofnetwork_mode=0`). Now emits `slicer.AdMeta(f'base64_{seg_id}', ...)` before both `AdStart` and `AdEnd` in the shared helper, matching legacy plugin convention (`base64_54`, `base64_48`, etc.).
+- Rendered plugin: OON=0 → AdEnd branches in both Standard Linear and LinearType5SegIds fired without attaching base64 as `AdMeta`. Now emit `slicer.AdMeta('base64_oon0', ...)` before `AdEnd`, symmetric with the existing `base64_oon1` on the OON=1 `AdStart` side. Pre-existing gap, not introduced by v1.5.x.
+- Generated `README.md`: TOC and inline references to `⚙️ Configuration`, `🎛️ Features enabled in this build`, and `🏗️ Architecture` used anchor slugs that dropped the base emoji character while keeping the variation selector (U+FE0F), producing broken links (`#️-configuration` rendered as an invisible-dash-only anchor that didn't resolve to any header). GitHub's actual slug for headers like `## ⚙️ Configuration` includes the full emoji. Fixed the four affected TOC anchors to match.
+
+### Notes
+- AdMeta additions are additive: downstream systems that don't consume the new keys are unaffected. Existing v1.5.x plugins regenerated at v1.5.2 will start emitting `base64_<seg_id>` and `base64_oon0` keys on ad breaks.
+- WMA production plugin at v0.0.5 was affected by the seg-ID AdMeta gap — regenerate at v0.0.6 with v1.5.2 to restore forensics.
+
 ## [1.5.1] - 2026-09-10
 
 ### Fixed

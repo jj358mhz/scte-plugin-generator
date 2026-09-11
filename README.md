@@ -62,7 +62,10 @@ Uplynk's LiveSlicer accepts a Python plugin to handle SCTE-35 signaling — the 
 ## 🎬 Available presets
 
 ### 📺 `linear`
-Standard linear ad-insertion. Fires ad-break start/end on configurable SCTE-35 segmentation descriptor pairs (34/35, 48/49, 54/55 by default; 32/33 and 50/51 available opt-in). Use for standard commercial broadcast feeds.
+Standard linear ad-insertion. Fires ad-break start/end on configurable SCTE-35 segmentation descriptor pairs, grouped by SCTE role: Provider (48/49, 52/53, 56/57), Distributor (50/51, 54/55, 58/59), plus neutral pairs 32/33 (Chapter) and 34/35 (Break). Pick which pairs to bake in at generation time, and filter which role's pairs fire at runtime via `ad_break_scope` in `uplynk.conf` (`provider` / `distributor` / `both`). Type 5 (splice_insert) dispatch is gated by `outofnetwork_mode`. Use for standard commercial broadcast feeds.
+
+### 📼 `linear_type5_segids`
+Variant of `linear` for encoders that emit `segmentation_descriptor` pairs inside `splice_insert` (Type 5) commands rather than the conventional `time_signal` (Type 6) carriage. Uncommon but SCTE-35-conformant. Type 6 dispatch is identical to `linear`; Type 5 dispatch is gated by `outofnetwork_mode` in `uplynk.conf` — when True, uses OON semantics (same as `linear`); when False, reads Type 5 descriptors and runs the seg-ID pair loop with `segmentation_duration` and `pts_offset_<seg_id>`, honoring `ad_break_scope`. Shares every runtime config key with `linear`.
 
 ### 🎥 `live_event`
 Disney-style live event lifecycle. Handles program start/end, mid-event slate breakaways and resumes, and provider placement opportunities. Types 0/16/17/19/20/54/55. Use for live sports, awards shows, or any feed where program boundaries matter more than fixed ad breaks.
@@ -133,6 +136,8 @@ scte-plugin-generator/
 │       ├── scte_plugin.py.j2       # master template — sections + entrypoints + method includes
 │       ├── _log_helpers.py.j2      # seg-type table + log() helpers (always emitted)
 │       ├── _method_linear.py.j2
+│       ├── _method_linear_common.py.j2       # shared Linear-family macros (linear + linear_type5_segids)
+│       ├── _method_linear_type5_segids.py.j2
 │       ├── _method_live_event.py.j2
 │       ├── _method_scte_logger.py.j2
 │       ├── example.conf.j2         # reference uplynk.conf

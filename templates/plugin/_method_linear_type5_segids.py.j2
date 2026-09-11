@@ -113,6 +113,9 @@ elif outofnetwork_mode:
             command_type=command_type, oon=0,
             call_sign=call_sign, slicer_version=slicer_version,
             stream_type=stream_type)
+        base64_oon0 = slice_info.get('base64')
+        base64_oon0_str = base64_oon0.decode('utf-8') if base64_oon0 else ''
+        slicer.AdMeta('base64_oon0', base64_oon0_str)
         slicer.AdEnd(int(pts + pts_offset))
 
     else:

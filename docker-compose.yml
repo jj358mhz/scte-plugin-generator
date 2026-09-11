@@ -18,6 +18,7 @@ services:
       dockerfile: Dockerfile
     image: scte-plugin-generator:latest
     container_name: scte-plugin-generator
+    pull_policy: never
     environment:
       - TZ=America/Los_Angeles
     restart: unless-stopped

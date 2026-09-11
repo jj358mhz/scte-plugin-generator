@@ -18,6 +18,8 @@ services:
       dockerfile: Dockerfile
     image: scte-plugin-generator:latest
     container_name: scte-plugin-generator
+    environment:
+      - TZ=America/Los_Angeles
     restart: unless-stopped
     expose:
       - "5000"

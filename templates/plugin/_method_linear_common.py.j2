@@ -135,9 +135,11 @@ def {{ method_name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
                 return
 
             seg_type_list = []
-            for descriptor in descriptors:
+            seg_id_indices = []  # parallel — original descriptor index for each seg_type_list entry
+            for i, descriptor in enumerate(descriptors):
                 if 'segmentation_type_id' in descriptor:
                     seg_type_list.append(descriptor['segmentation_type_id'])
+                    seg_id_indices.append(i)
 
             # ---------------------------------------------------------
             # Splice Null — log only, take no action.
@@ -160,7 +162,8 @@ def {{ method_name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
             else:
                 if 16 in seg_type_list:
                     index = seg_type_list.index(16)
-                    upid_bytes = descriptors[index].get('segmentation_upid', b'')
+                    seg_id_index = seg_id_indices[index]
+                    upid_bytes = descriptors[seg_id_index].get('segmentation_upid', b'')
                     try:
                         upid = str(upid_bytes, 'UTF-8') if upid_bytes else ''
                     except Exception as e:
@@ -247,7 +250,8 @@ def {{ method_name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
                     stream_type=stream_type)
             else:
                 _handle_time_signal_ad_breaks(
-                    slice_info, slicer_id, seg_type_list, descriptors, pts,
+                    slice_info, slicer_id, seg_type_list, seg_id_indices,
+                    descriptors, pts,
                     call_sign=call_sign,
                     slicer_version=slicer_version,
                     stream_type=stream_type,
@@ -276,7 +280,7 @@ def {{ method_name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
 
 {% macro linear_helpers() %}
 def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
-                                  descriptors, pts, **kwargs):
+                                  seg_id_indices, descriptors, pts, **kwargs):
     """
         START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.
 
@@ -314,26 +318,30 @@ def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
     else:
         allowed_role_ids = ROLE_TAGGED_AD_SEG_IDS  # 'both'
 
-    dropped = [s for s in seg_type_list
+        dropped = [s for s in seg_type_list
                if s in ROLE_TAGGED_AD_SEG_IDS and s not in allowed_role_ids]
     if dropped:
         log(f'[upl-py_Mode] ad_break_scope={ad_scope}, observed but '
             f'ignoring out-of-scope Type 6 seg_ids: {dropped}',
             call_sign=call_sign, slicer_version=slicer_version,
             stream_type=stream_type)
-        seg_type_list = [s for s in seg_type_list if s not in dropped]
+        # Filter both lists in lockstep to preserve index alignment.
+        filtered = [(s, i) for s, i in zip(seg_type_list, seg_id_indices) if s not in dropped]
+        seg_type_list = [s for s, _ in filtered]
+        seg_id_indices = [i for _, i in filtered]
 
     for start_id, end_id, seg_name in (
 {% for pair in m.seg_id_pairs %}
         ({{ pair[0] }}, {{ pair[1] }}, '{{ pair[2] }}'),
 {% endfor %}
     ):
-                # ----- START handler -----
+        # ----- START handler -----
         if start_id in seg_type_list:
             index = seg_type_list.index(start_id)
-            upid_bytes = descriptors[index].get('segmentation_upid', b'')
+            seg_id_index = seg_id_indices[index]
+            upid_bytes = descriptors[seg_id_index].get('segmentation_upid', b'')
             upid = str(upid_bytes, 'UTF-8') if upid_bytes else ''
-            duration = break_dur(slice_info, index)
+            duration = break_dur(slice_info, seg_id_index)
 
             if duration == 0:
                 ZERO_DUR_PAIRS.add((start_id, end_id))
@@ -408,7 +416,8 @@ def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
                 continue
 
             index = seg_type_list.index(end_id)
-            upid_bytes = descriptors[index].get('segmentation_upid', b'')
+            seg_id_index = seg_id_indices[index]
+            upid_bytes = descriptors[seg_id_index].get('segmentation_upid', b'')
             upid = str(upid_bytes, 'UTF-8') if upid_bytes else ''
             pts_offset = pts_off_x(end_id)
             log(f'[upl-py_Off] From {end_id}, pts_offset set as: {pts_offset} pts',

@@ -21,6 +21,16 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.5.3] - 2026-09-13
+
+### Fixed
+- Rendered plugin: `_handle_time_signal_ad_breaks` and the Type 16 program-start block subscripted `descriptors[index]` using `index = seg_type_list.index(seg_id)`, but `seg_type_list` was built by skipping non-segmentation descriptors (avail, DTMF, time, audio — SCTE-35 descriptor tags 0x00-0x04). A non-segmentation descriptor interleaved before a segmentation descriptor shifted the mapping — `descriptors[index]` selected the wrong entry, producing wrong `segmentation_upid`, wrong `segmentation_duration`, and wrong dispatch decisions. Now tracks `seg_id_indices` alongside `seg_type_list` (parallel arrays of original descriptor positions), and subscripts `descriptors[seg_id_indices[index]]` throughout. Scope filter also maintains both lists in lockstep. Pre-v1.4 plugins had this tracking; lost during the v1.5.0 chunk-1 refactor into the common macro. AST-equivalence verification during that refactor preserved the latent bug. See issue #1.
+- Same fix applied to `_method_linear_type5_segids.py.j2`'s seg-ID dispatch path (Type 5 with `outofnetwork_mode=0`), which had inherited the same pattern.
+
+### Notes
+- Most linear broadcast feeds only carry segmentation descriptors, so this never fired in practice. The bug surfaces when the encoder emits interleaved non-segmentation descriptors — most likely for feeds using Type 5 with descriptors (`linear_type5_segids`), which is why WMA regeneration at v1.0.1 is required before their MR merges.
+- Flagged by CodeLynk static analysis on the WMA v1.0.0 GitLab MR.
+
 ## [1.5.2] - 2026-09-10
 
 ### Fixed

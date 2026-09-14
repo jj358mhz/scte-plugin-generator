@@ -144,12 +144,15 @@ else:
             slicer_version=slicer_version, stream_type=stream_type)
     else:
         seg_type_list = []
-        for descriptor in descriptors:
+        seg_id_indices = []  # parallel — original descriptor index for each seg_type_list entry
+        for i, descriptor in enumerate(descriptors):
             if 'segmentation_type_id' in descriptor:
                 seg_type_list.append(descriptor['segmentation_type_id'])
+                seg_id_indices.append(i)
 
         _handle_time_signal_ad_breaks(
-            slice_info, slicer_id, seg_type_list, descriptors, pts,
+            slice_info, slicer_id, seg_type_list, seg_id_indices,
+            descriptors, pts,
             call_sign=call_sign,
             slicer_version=slicer_version,
             stream_type=stream_type,

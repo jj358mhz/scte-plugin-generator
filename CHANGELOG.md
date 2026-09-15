@@ -21,6 +21,17 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.5.4] - 2026-09-15
+
+### Fixed
+- Rendered plugin: `dropped = [...]` list comprehension inside `_handle_time_signal_ad_breaks` was indented 8 spaces, placing it inside the `else:` branch of the `ad_scope == 'both'` if/elif/else. Under `ad_break_scope='provider'` or `ad_break_scope='distributor'`, `dropped` was never assigned, and the immediately following `if dropped:` raised `NameError: name 'dropped' is not defined` at Process35 dispatch. AST-valid, semantically broken — `ast.parse()` on rendered output cleared it because the name resolution error only fires at call time inside the function body. Dedented to 4 spaces (function-body level), matching where `if dropped:` sits. Continuation line also dedented from 15 → 11 spaces to preserve list-comprehension alignment. Introduced in v1.5.3 during the `seg_id_indices` refactor into the common macro; missed because verification stopped at `ast.parse()`. Matches mss-plugins hand-fix commit `31b0b96` from the WMA 1.0.1 deployment.
+- Rendered plugin: docstring first line of `_handle_time_signal_ad_breaks` (`START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.`) was indented 8 spaces where the rest of the docstring is at 4, producing a spurious PyCharm inspection warning on every generated plugin. Cosmetic; no runtime effect. Dedented to 4. Matches mss-plugins hand-fix commit `576acbee`.
+
+### Notes
+- WMA production plugin (v1.0.1, `linear_type5_segids`, `ad_break_scope: distributor`) was affected by the `dropped =` scope bug and was hand-fixed customer-side before v1.5.4 shipped. The fresh v1.5.4 render of the WMA form config now diff-cleans against production `scte-wma.py` v1.0.1 within `_handle_time_signal_ad_breaks` — the port is byte-exact. Whole-file diff shows only `Generated:` and `PLUGIN_VERSION` timestamp deltas.
+- Any other customer plugin generated with v1.5.3 and deployed with `ad_break_scope != 'both'` would `NameError` on the first Type 6 `time_signal` dispatch. WMA is the only known deployment on v1.5.3 with a non-`both` scope; no other regenerations required.
+- Verification gap that caused this to ship, again: `ast.parse()` clears name-resolution bugs inside function bodies. v1.5.1 notes flagged the same class of gap and deferred a real fix to v1.6.x backlog. This release doesn't close that gap, but reinforces its priority. Cheap partial mitigation for the interim: render under each `ad_break_scope` value and grep for unbalanced indent around known-fragile blocks (the `dropped =` region, the `global` decls). Closes #3.
+
 ## [1.5.3] - 2026-09-13
 
 ### Fixed

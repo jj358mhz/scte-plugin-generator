@@ -21,6 +21,14 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.5.5] - 2026-09-15
+
+### Fixed
+- `GENERATOR_VERSION` in `app.py` was left at `'1.5.3'` through the v1.5.4 release, so plugins generated with v1.5.4 were stamped `v1.5.3` in the form footer, `/healthz` response, generated `README.md`, generated `CHANGELOG.md`, and generated `example.conf`. Metadata-only — no rendered plugin code affected — but the stamp is a durable audit trail so a fast-follow bumps to v1.5.5 rather than leaving a false stamp in circulation. Any WMA-adjacent plugin regeneration done during the v1.5.4 window should be re-run at v1.5.5 to correct the stamp; the plugin code itself is unchanged.
+
+### Notes
+- Add `GENERATOR_VERSION` bump to the pre-tag checklist in `CLAUDE.md`. Cheap mechanical check: `grep "GENERATOR_VERSION = '" app.py` should match the version being tagged.
+
 ## [1.5.4] - 2026-09-15
 
 ### Fixed

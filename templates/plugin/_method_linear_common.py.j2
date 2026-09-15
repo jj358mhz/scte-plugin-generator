@@ -282,7 +282,7 @@ def {{ method_name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
 def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
                                   seg_id_indices, descriptors, pts, **kwargs):
     """
-        START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.
+    START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.
 
     Zero-duration START events: record the (start_id, end_id) pair in
     ZERO_DUR_PAIRS, skip AdStart to prevent an infinite ad break (calling
@@ -318,8 +318,8 @@ def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
     else:
         allowed_role_ids = ROLE_TAGGED_AD_SEG_IDS  # 'both'
 
-        dropped = [s for s in seg_type_list
-               if s in ROLE_TAGGED_AD_SEG_IDS and s not in allowed_role_ids]
+    dropped = [s for s in seg_type_list
+           if s in ROLE_TAGGED_AD_SEG_IDS and s not in allowed_role_ids]
     if dropped:
         log(f'[upl-py_Mode] ad_break_scope={ad_scope}, observed but '
             f'ignoring out-of-scope Type 6 seg_ids: {dropped}',

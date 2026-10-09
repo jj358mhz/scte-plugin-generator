@@ -12,8 +12,8 @@ on:
       - main
 
 jobs:
-  test:
-    name: pytest
+  lint-and-test:
+    name: lint-and-test
     runs-on: ubuntu-latest
     timeout-minutes: 10
 

@@ -126,6 +126,17 @@ PROVIDER_AD_SEG_IDS    = frozenset({48, 49, 52, 53, 56, 57})
 DISTRIBUTOR_AD_SEG_IDS = frozenset({50, 51, 54, 55, 58, 59})
 ROLE_TAGGED_AD_SEG_IDS = PROVIDER_AD_SEG_IDS | DISTRIBUTOR_AD_SEG_IDS
 ALL_AD_BREAK_SEG_IDS   = ROLE_TAGGED_AD_SEG_IDS | frozenset({32, 33, 34, 35})
+
+# Per-channel-group ad-break pair tables for _handle_time_signal_ad_breaks.
+# Baked in at generation time from each method's seg-ID pair checkboxes.
+# Format: ((start_id, end_id, human_name), ...)
+{% for m in methods if m.preset in ('linear', 'linear_type5_segids') %}
+{{ m.channel_group | upper }}_AD_PAIRS = (
+{% for pair in m.seg_id_pairs %}
+    ({{ pair[0] }}, {{ pair[1] }}, '{{ pair[2] }}'),
+{% endfor %}
+)
+{% endfor %}
 {% endif %}
 {% if 'boundary_handling' in features %}
 
@@ -650,7 +661,9 @@ def ad_break_mode(mode=None) -> str:
 
     Selects which SCTE command type drives ad breaks:
         splice_insert — command_type=5 with OON indicator
-        time_signal   — command_type=6 with seg IDs 34/35, 48/49, 54/55
+        time_signal   — command_type=6 with the seg-ID pairs baked into
+                        each channel group's <CHANNEL_GROUP>_AD_PAIRS
+                        constant
     """
     global AD_BREAK_MODE
     if mode in AD_BREAK_MODE:
@@ -1229,3 +1242,12 @@ def Process35(slice_info: slicer.SliceInfo) -> int:
 {% include '_method_scte_logger.py.j2' %}
 {% endif %}
 {% endfor %}
+{% if has_linear or has_linear_type5_segids %}
+{% import '_method_linear_common.py.j2' as common with context %}
+
+
+# =============================================================================
+# Linear-family shared helpers — emitted once per plugin
+# =============================================================================
+{{ common.linear_helpers() | trim }}
+{% endif %}

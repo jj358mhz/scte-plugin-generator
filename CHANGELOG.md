@@ -21,6 +21,26 @@ Version bump policy:
 ### Fixed
 -
 
+## [1.6.0] - 2026-10-08
+
+### Fixed
+- Rendered plugin: `_handle_time_signal_ad_breaks` was emitted once per Linear-family method, each copy with that method's `seg_id_pairs` hardcoded in its loop. A plugin with both `linear` and `linear_type5_segids` therefore had two module-level `def`s of the same name, and the second rebound the first at import time, so **both** methods dispatched against the `linear_type5_segids` pair table. The `linear` method silently dropped its own pairs and honored the other method's pairs instead, with no error or log line. Observed in scte-wma v1.1.0: `linear_foxnow` (34/35) never fired AdStart/AdEnd because it inherited `linear_newsmax`'s 50/51 table. Fixes #6.
+  - The helper is now emitted once per plugin, from `scte_plugin.py.j2`, after all channel-group methods. `linear_helpers()` no longer references `m`.
+  - The pairs table is now a keyword-only `pairs=` argument. Each Linear-family method gets a module constant, `<CHANNEL_GROUP>_AD_PAIRS` (e.g. `LINEAR_FOXNOW_AD_PAIRS`), next to `ALL_AD_BREAK_SEG_IDS`. Each method passes its own constant at every call site: the Type 6 path in both presets, plus the Type 5 descriptor path (`outofnetwork_mode=False`) in `linear_type5_segids`.
+  - The helper logs `[upl-py_Err]` and returns if it is called without pairs.
+- Rendered plugin: the `ad_break_mode()` docstring hardcoded `seg IDs 34/35, 48/49, 54/55`. It now points at the per-channel-group pair constants.
+
+### Added
+- `parse_methods_from_form` rejects duplicate `channel_group` values with a 400. Channel groups were already the Process35 dispatch key (duplicates made the second method unreachable). Now they also name the `_AD_PAIRS` constants.
+- `tests/test_generated_plugins.py` (pytest) renders every preset × feature combination (120 renders). It checks that each one parses and has no duplicate top-level `def`s. For the two-linear case it also checks per-method `pairs=` wiring and pair-constant values, and runs stubbed-`slicer` runtime dispatch (34/35 fires only on `linear_foxnow`, 50/51 only on `linear_newsmax`). It finishes with `ruff check --select E9,F811` on all rendered samples.
+- `.github/workflows/test.yml` runs the suite on every PR and push to `main`. `requirements-dev.txt` adds `pytest` and `ruff`.
+
+### Notes
+- Single-Linear-method plugins behave the same as before. An AST diff against v1.5.5 output shows only the intended changes: the new `<CHANNEL_GROUP>_AD_PAIRS` constant, `pairs=` at call sites, the helper signature/guard/loop, and the moved helper position.
+- Affected deployments: any plugin generated with **both** `linear` and `linear_type5_segids` selected and different pair sets. Regenerate at v1.6.0. scte-wma v1.1.0 was already hand-patched customer-side.
+- `ruff --select F811` alone does **not** catch this bug class. The first helper `def` counts as "used" by the method above it, so ruff reports no unused redefinition. The AST duplicate-`def` test is the real guard.
+- MINOR bump: the generated helper's call signature changed, and the repo gained a test suite and CI.
+
 ## [1.5.5] - 2026-09-15
 
 ### Fixed

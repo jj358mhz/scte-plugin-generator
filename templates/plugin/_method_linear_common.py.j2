@@ -13,6 +13,10 @@
     linear_helpers()            — module-level helpers shared by all
                                   Linear-family presets
                                   (_handle_time_signal_ad_breaks).
+                                  Called ONCE from scte_plugin.py.j2,
+                                  never per method — a per-method def
+                                  is rebound by the next one (issue #6).
+                                  Must not reference `m`.
 
   Context in scope when these macros expand (from the parent template):
     m               (dict)       — the method entry
@@ -252,6 +256,7 @@ def {{ method_name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
                 _handle_time_signal_ad_breaks(
                     slice_info, slicer_id, seg_type_list, seg_id_indices,
                     descriptors, pts,
+                    pairs={{ m.channel_group | upper }}_AD_PAIRS,
                     call_sign=call_sign,
                     slicer_version=slicer_version,
                     stream_type=stream_type,
@@ -280,7 +285,8 @@ def {{ method_name }}(slice_info: slicer.SliceInfo, slicer_id) -> None:
 
 {% macro linear_helpers() %}
 def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
-                                  seg_id_indices, descriptors, pts, **kwargs):
+                                  seg_id_indices, descriptors, pts, *,
+                                  pairs=(), **kwargs):
     """
     START seg IDs fire AdStart/StartBoundary. END seg IDs fire AdEnd/EndBoundary.
 
@@ -294,13 +300,23 @@ def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
     the discard at the top of the START else branch). This prevents a
     stale entry from one bogus break corrupting a later good pair's END.
 
-    Active pairs driven by m.seg_id_pairs from the generator form.
+    Active pairs passed in by the caller via
+    pairs=((start_id, end_id, name), ...) — one <CHANNEL_GROUP>_AD_PAIRS
+    module constant per Linear-family method. Emitted once per plugin;
+    must not bake in any single method's pairs.
     """
     global ZERO_DUR_PAIRS
     call_sign = kwargs.get('call_sign', '-')
     slicer_version = kwargs.get('slicer_version', '-')
     stream_type = kwargs.get('stream_type', '-')
     ad_scope = kwargs.get('ad_scope', 'both')
+
+    if not pairs:
+        log('[upl-py_Err] _handle_time_signal_ad_breaks called without pairs, '
+            'taking no action',
+            call_sign=call_sign, slicer_version=slicer_version,
+            stream_type=stream_type)
+        return
 {% if 'boundary_handling' in features %}
     use_boundary = kwargs.get('use_boundary', False)
     boundary_dur_max = kwargs.get('boundary_dur_max', 0)
@@ -330,11 +346,7 @@ def _handle_time_signal_ad_breaks(slice_info, _slicer_id, seg_type_list,
         seg_type_list = [s for s, _ in filtered]
         seg_id_indices = [i for _, i in filtered]
 
-    for start_id, end_id, seg_name in (
-{% for pair in m.seg_id_pairs %}
-        ({{ pair[0] }}, {{ pair[1] }}, '{{ pair[2] }}'),
-{% endfor %}
-    ):
+    for start_id, end_id, seg_name in pairs:
         # ----- START handler -----
         if start_id in seg_type_list:
             index = seg_type_list.index(start_id)

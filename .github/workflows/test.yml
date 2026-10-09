@@ -1,0 +1,33 @@
+# .github/workflows/test.yml
+# Renders every preset/feature combination and checks the generated plugins:
+# AST parse, no duplicate top-level defs, per-method ad-break pair wiring,
+# stubbed-slicer runtime dispatch, and ruff (E9, F811) on rendered output.
+
+name: Test
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: pytest
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run tests
+        run: pytest -q tests

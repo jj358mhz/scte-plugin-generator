@@ -17,7 +17,7 @@ from typing import Any
 from flask import Flask, render_template, request, send_file, abort
 from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
-GENERATOR_VERSION = '1.5.5'  # bump on meaningful generator changes
+GENERATOR_VERSION = '1.6.0'  # bump on meaningful generator changes
 
 app = Flask(__name__)
 
@@ -169,6 +169,17 @@ def parse_methods_from_form(form) -> list[dict[str, Any]]:
                 )
             entry['ad_break_scope'] = scope
         methods.append(entry)
+
+    # channel_group must be unique: it's the Process35 dispatch key and the
+    # stem of each Linear-family method's <CHANNEL_GROUP>_AD_PAIRS constant.
+    seen: set[str] = set()
+    for m in methods:
+        if m['channel_group'] in seen:
+            raise ValueError(
+                f'Duplicate channel_group {m["channel_group"]!r} — each '
+                f'selected method needs its own channel group'
+            )
+        seen.add(m['channel_group'])
     return methods
 
 

@@ -153,6 +153,7 @@ else:
         _handle_time_signal_ad_breaks(
             slice_info, slicer_id, seg_type_list, seg_id_indices,
             descriptors, pts,
+            pairs={{ m.channel_group | upper }}_AD_PAIRS,
             call_sign=call_sign,
             slicer_version=slicer_version,
             stream_type=stream_type,
@@ -163,6 +164,3 @@ else:
 {% endif %}
         )
 {% endcall %}
-
-
-{{ common.linear_helpers() }}
